@@ -33,8 +33,10 @@ and skip the "Mount Stupid" curve; it's an internet cartoon, not from the paper.
 - **CLI mode — the reproducible offline floor.** When the user wants a deterministic,
   repeatable score, or isn't in an agent session, run the `dk` CLI:
   ```
-  dk interview <repo>     # self-rate → grilled → score → D-K curve → teach
+  dk interview <repo>     # self-rate → grilled → score → placement → teach
   dk teach <repo> [sym]   # just the teaching loop on the weakest / a named symbol
+  dk report <repo>        # write a markdown calibration report (gap + reading list)
+  dk vault <repo>         # build the comprehension graph (needs `pip install graphifyy`)
   ```
   The CLI grades with a deterministic keyword matcher — honest as a *recall smoke-test*, not
   a comprehension grade. It **never uses an API key**; for real grading outside the chat it
@@ -86,10 +88,11 @@ receipts either way — only the question set differs (whole repo vs. just the c
 5. **Placement** — self% vs measured%, gap, zone. See `sections/CURVE.md`.
 6. **Persist + teach** — append the run to `.dunning-kruger/overlay.json`; offer the
    teaching loop on the weakest target. See `sections/TEACHING.md`.
-7. **Offer the map** — once a run exists, offer `dk vault <repo>`: it exports the codebase as an
-   Obsidian vault (note per function, `[[wikilinks]]` = call edges, folders = domains) with nodes
-   **colored by the comprehension scores you just produced** — your black boxes, lit up on the
-   real structure of the code. A nice "see your gaps" close; skip if they're not Obsidian users.
+7. **Offer the map** — once a run exists, offer `dk vault <repo>`: it builds an Obsidian vault of
+   the codebase via [graphify](https://github.com/safishamsi/graphify) (note per function,
+   `[[wikilinks]]` = call edges, Leiden communities = domains) and **recolors each node by the
+   comprehension scores you just produced** — your black boxes, lit up on the real structure of the
+   code. Needs graphify once (`pip install graphifyy`); skip if they're not Obsidian users.
 
 ## Question altitude — interview, don't quiz
 

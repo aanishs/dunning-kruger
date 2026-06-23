@@ -1,13 +1,15 @@
 import { describe, it, expect } from "vitest";
 import * as path from "path";
+import * as fs from "fs";
+import * as os from "os";
 import { indexRepo } from "../src/substrate/ts-compiler";
 import { pickTargets } from "../src/pickTargets";
 import { generateQuestions } from "../src/generateQuestions";
 import { keywordMatcher } from "../src/grade/keyword-matcher";
 import { placeOnCurve } from "../src/curve";
 import { buildLesson } from "../src/teach";
-import { renderCurveHtml } from "../src/render/curve-html";
-import { buildVault } from "../src/render/obsidian";
+import { renderReportMarkdown } from "../src/render/curve-md";
+import { overlayComprehension, joinKey } from "../src/render/comprehension-overlay";
 import type { Question } from "../src/types";
 
 const FIX = path.join(__dirname, "fixture");
@@ -187,104 +189,122 @@ describe("teaching loop (buildLesson)", () => {
   });
 });
 
-describe("obsidian vault export", () => {
-  const g = indexRepo(FIX);
-  const files = buildVault(g);
-  const noteFor = (name: string, fs = files) =>
-    fs.find((f) => new RegExp(`^# ${name}$`, "m").test(f.content));
+describe("comprehension overlay (onto a graphify vault)", () => {
+  // A minimal stand-in for what `graphify export obsidian` writes: per-note YAML frontmatter with
+  // source_file + a tags list, a `# name()` heading for functions, an inline #graphify tag line,
+  // and an .obsidian/graph.json carrying community colorGroups.
+  function makeVault(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dk-vault-"));
+    const note = (name: string, file: string, isFn: boolean) =>
+      `---\nsource_file: "${file}"\ntype: "code"\ncommunity: "Community 1"\nlocation: "L10"\ntags:\n  - graphify/code\n  - community/Community_1\n---\n\n# ${name}${isFn ? "()" : ""}\n\n#graphify/code #community/Community_1\n`;
+    fs.writeFileSync(path.join(dir, "foo().md"), note("foo", "src/x.ts", true));
+    fs.writeFileSync(path.join(dir, "bar().md"), note("bar", "src/y.ts", true));
+    fs.writeFileSync(path.join(dir, "Widget.md"), note("Widget", "src/z.ts", false)); // not a function
+    fs.mkdirSync(path.join(dir, ".obsidian"));
+    fs.writeFileSync(
+      path.join(dir, ".obsidian", "graph.json"),
+      JSON.stringify({ colorGroups: [{ query: "tag:#community/Community_1", color: { a: 1, rgb: 1 } }] }),
+    );
+    return dir;
+  }
 
-  it("emits a note per symbol plus _Home and a graph color config", () => {
-    expect(files.some((f) => f.path === "_Home.md")).toBe(true);
-    expect(files.some((f) => f.path === ".obsidian/graph.json")).toBe(true);
-    const notes = files.filter((f) => f.path.endsWith(".md") && f.path !== "_Home.md");
-    expect(notes.length).toBe(g.nodes.length);
+  it("colors a scored function note by its bucket and leaves unscored functions untested", () => {
+    const dir = makeVault();
+    const res = overlayComprehension(dir, { [joinKey("src/x.ts", "foo")]: { score: 0 } });
+    expect(res.tagged).toBe(1);
+    expect(res.untested).toBe(1); // bar() had no score
+    expect(res.unmatched).toEqual([]);
+    expect(fs.readFileSync(path.join(dir, "foo().md"), "utf8")).toContain("dk/blackbox");
+    expect(fs.readFileSync(path.join(dir, "bar().md"), "utf8")).toContain("dk/untested");
   });
 
-  it("renders call edges as wikilinks (priceOrder -> clamp, formatMoney)", () => {
-    const note = noteFor("priceOrder")!;
-    expect(note.content).toMatch(/\[\[[^\]]*\|clamp\]\]/);
-    expect(note.content).toMatch(/\[\[[^\]]*\|formatMoney\]\]/);
+  it("never tags a non-function note", () => {
+    const dir = makeVault();
+    overlayComprehension(dir, {});
+    expect(fs.readFileSync(path.join(dir, "Widget.md"), "utf8")).not.toMatch(/dk\//);
   });
 
-  it("tags untested nodes dk/untested", () => {
-    expect(noteFor("clamp")!.content).toContain("dk/untested");
-  });
-
-  it("colors a node by comprehension score and shows the felt-vs-showed receipt", () => {
-    const clamp = g.nodes.find((n) => n.name === "clamp")!;
-    const scored = buildVault(g, { scores: { [clamp.id]: { score: 0, self: 5 } } });
-    const note = noteFor("clamp", scored)!;
-    expect(note.content).toContain("dk/blackbox");
-    expect(note.content).toContain("you felt 5/5, you showed 0/5");
-  });
-
-  it("breaks the score into per-facet dimensions when present", () => {
-    const clamp = g.nodes.find((n) => n.name === "clamp")!;
-    const scored = buildVault(g, {
-      scores: { [clamp.id]: { score: 2, self: 4, dimensions: { mechanism: 4, failureModes: 0 } } },
-    });
-    const note = noteFor("clamp", scored)!;
-    expect(note.content).toContain("mechanism: 4/5");
-    expect(note.content).toContain("failure modes: 0/5");
-    expect(note.content).toContain("you showed 2/5 overall");
-  });
-
-  it("the graph config maps comprehension tags to colors", () => {
-    const cfg = JSON.parse(files.find((f) => f.path === ".obsidian/graph.json")!.content);
+  it("prepends comprehension colorGroups so they win over community color", () => {
+    const dir = makeVault();
+    overlayComprehension(dir, { [joinKey("src/x.ts", "foo")]: { score: 5 } });
+    const cfg = JSON.parse(fs.readFileSync(path.join(dir, ".obsidian", "graph.json"), "utf8"));
     const queries = cfg.colorGroups.map((c: { query: string }) => c.query);
-    expect(queries).toContain("tag:#dk/blackbox");
-    expect(queries).toContain("tag:#dk/understood");
+    expect(queries.slice(0, 4)).toEqual([
+      "tag:#dk/understood",
+      "tag:#dk/shaky",
+      "tag:#dk/blackbox",
+      "tag:#dk/untested",
+    ]);
+    expect(queries).toContain("tag:#community/Community_1"); // community group kept after
   });
 
-  it("produces unique note paths", () => {
-    const paths = files.filter((f) => f.path.endsWith(".md")).map((f) => f.path);
-    expect(new Set(paths).size).toBe(paths.length);
+  it("is idempotent — re-running re-derives one dk tag, not a stack", () => {
+    const dir = makeVault();
+    const scores = { [joinKey("src/x.ts", "foo")]: { score: 5 } };
+    overlayComprehension(dir, scores);
+    overlayComprehension(dir, { [joinKey("src/x.ts", "foo")]: { score: 1 } }); // re-score
+    const note = fs.readFileSync(path.join(dir, "foo().md"), "utf8");
+    expect((note.match(/- dk\//g) || []).length).toBe(1);
+    expect(note).toContain("dk/blackbox"); // reflects the latest score, not the first
+    expect(note).not.toContain("dk/understood");
+  });
+
+  it("reports scores that match no note (renamed/moved since the interview)", () => {
+    const dir = makeVault();
+    const res = overlayComprehension(dir, { [joinKey("src/gone.ts", "ghost")]: { score: 3 } });
+    expect(res.unmatched).toEqual([joinKey("src/gone.ts", "ghost")]);
   });
 });
 
-describe("curve html artifact", () => {
-  it("renders a self-contained, honest SVG card", () => {
-    const html = renderCurveHtml({
-      title: "demo",
-      date: "2026-06-22",
-      selfPct: 90,
-      measuredPct: 40,
-      gap: 50,
-      zone: "confidence ran ahead of competence",
-      points: [{ name: "foo", selfPct: 90, measuredPct: 40 }],
+describe("markdown report", () => {
+  const base = {
+    title: "demo",
+    date: "2026-06-23",
+    selfPct: 90,
+    measuredPct: 40,
+    gap: 50,
+    zone: "confidence ran ahead of competence",
+  };
+
+  it("renders the gap, a per-symbol table, and a tick-off reading list (weakest first)", () => {
+    const md = renderReportMarkdown({
+      ...base,
+      points: [
+        { name: "strong", location: "a.ts:1", self: 4, measured: 5, missed: [] },
+        { name: "weak", location: "b.ts:2", self: 5, measured: 1, missed: ["what breaks if null"] },
+      ],
     });
-    expect(html).toContain("<svg");
-    expect(html).toContain("40%"); // competence number
-    expect(html).toContain("confidence ran ahead of competence"); // honest zone
-    expect(html).toContain("isn't in Kruger"); // the meme caveat is present, not the meme curve
+    expect(md).toContain("confidence");
+    expect(md).toContain("+50%");
+    expect(md).toContain("| `strong`"); // the table
+    expect(md).toContain("- [ ] `weak` (b.ts:2) — what breaks if null"); // checklist item
+    expect(md).not.toContain("- [ ] `strong`"); // nothing missed → not on the list
   });
-  it("escapes html in user-supplied names", () => {
-    const html = renderCurveHtml({
-      title: "x",
-      date: "d",
-      selfPct: 0,
-      measuredPct: 0,
-      gap: 0,
-      zone: "z",
-      points: [{ name: "<script>", selfPct: 0, measuredPct: 0 }],
+
+  it("says nothing's flagged when every answer is covered", () => {
+    const md = renderReportMarkdown({
+      ...base,
+      points: [{ name: "ok", location: "a.ts:1", self: 3, measured: 5, missed: [] }],
     });
-    expect(html).not.toContain("<script>");
-    expect(html).toContain("&lt;script&gt;");
+    expect(md).toContain("Nothing flagged");
   });
-  it("never renders NaN/Infinity in numeric fields", () => {
-    const html = renderCurveHtml({
-      title: "x",
-      date: "d",
-      selfPct: NaN,
-      measuredPct: Infinity,
-      gap: NaN,
-      zone: "z",
-      points: [{ name: "p", selfPct: NaN, measuredPct: -50 }],
+
+  it("formats per-facet dimensions in the table when present", () => {
+    const md = renderReportMarkdown({
+      ...base,
+      points: [
+        {
+          name: "f",
+          location: "a.ts:1",
+          self: 4,
+          measured: 2,
+          missed: [],
+          dimensions: { mechanism: 4, failureModes: 0 },
+        },
+      ],
     });
-    expect(html).not.toContain("NaN");
-    expect(html).not.toContain("Infinity");
-    // every non-finite input collapses to a safe 0, never garbage text
-    expect(html).toContain("0%");
+    expect(md).toContain("mechanism 4/5");
+    expect(md).toContain("failure-modes 0/5");
   });
 });
 

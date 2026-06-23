@@ -70,7 +70,8 @@ $ dk interview ./my-app
 It's **growth, not gotcha.** The most hopeful part of Kruger & Dunning's work is buried in their
 fourth study: when they *taught* people the skill, people got better at judging themselves too.
 So this doesn't just hand you a number &mdash; it teaches the part you missed, then asks again, and
-shows you the climb. Run `dk curve` and it writes a shareable HTML card of where you landed.
+shows you the climb. Run `dk report` and it writes a markdown calibration report &mdash; your gap, a
+per-symbol table, and a tick-off reading list you work down as you learn.
 
 ## Honest about the grading (and your keys)
 
@@ -88,15 +89,19 @@ shows you the climb. Run `dk curve` and it writes a shareable HTML card of where
 
 Either way it shows its work, down to the line, so you can argue with it.
 
-## See your black boxes &mdash; as a knowledge graph
+## See your black boxes &mdash; painted onto a real knowledge graph
 
-`dk vault ./my-app` exports your repo as an **Obsidian vault**: one note per function, every
-`[[wikilink]]` a call edge, and the folders become your **domains**. Open it in Obsidian, hit
-*Graph view*, and you're looking at the shape of your codebase. The twist: each node is **colored
-by how well you explained it** &mdash; 🔴 black box, 🟠 shaky, 🟢 understood, ⚪ not yet tested.
-So your comprehension gaps light up *on the actual structure of your code*. Interview more, and more
-of the graph turns green. (We render nothing &mdash; Obsidian is the dashboard; we just emit
-markdown + a graph color-config.)
+`dk vault ./my-app` builds an **Obsidian vault of your codebase** &mdash; one note per function,
+`[[wikilinks]]` for call edges, algorithmically-detected **communities as your domains** &mdash; then
+**recolors every node by how well you explained it**: 🔴 black box, 🟠 shaky, 🟢 understood, ⚪ not
+yet tested. Open it in Obsidian, hit *Graph view*, and your comprehension gaps light up *on the
+actual structure of your code*. Interview more, re-run `dk vault`, and more of the graph turns green.
+
+We don't build the graph ourselves &mdash; [**graphify**](https://github.com/safishamsi/graphify)
+does (deterministic tree-sitter extraction across 36 languages, Leiden communities, the Obsidian
+export), and we layer your comprehension on top. So the graph needs graphify once:
+`pip install graphifyy`. That's the whole division of labor &mdash; graphify owns the map;
+dunning-kruger measures *you* and colors it.
 
 ## A second job: ownership
 
@@ -125,7 +130,8 @@ Or the standalone CLI, no session needed (`--smart` grades via your own `claude`
 
 ```bash
 npm i && npm run dk -- interview /path/to/your/ts/repo
-npm run dk -- vault /path/to/your/ts/repo     # export the Obsidian comprehension graph
+npm run dk -- report  /path/to/your/ts/repo   # write a markdown calibration report
+npm run dk -- vault   /path/to/your/ts/repo   # build the comprehension graph (needs `pip install graphifyy`)
 ```
 
 ---

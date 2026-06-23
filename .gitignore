@@ -4,3 +4,6 @@ dist/
 .dunning-kruger/
 coverage/
 *.log
+
+# graphify build output (dk vault shells to graphify)
+graphify-out/

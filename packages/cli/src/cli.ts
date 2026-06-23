@@ -12,6 +12,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as readline from "node:readline";
+import { execFileSync } from "child_process";
 import {
   indexRepo,
   pickTargets,
@@ -19,8 +20,10 @@ import {
   keywordMatcher,
   placeOnCurve,
   buildLesson,
-  renderCurveHtml,
-  buildVault,
+  renderReportMarkdown,
+  overlayComprehension,
+  joinKey,
+  llmFreeEnv,
   Target,
   Question,
   GradeResult,
@@ -60,9 +63,10 @@ async function main(argv: string[]): Promise<number> {
     case "help":
     case "-h":
     case "--help":
-      console.log("dk index|targets|questions|interview|teach|curve|vault <repo> [n|symbol|out]");
-      console.log("  vault <repo> [dir]       export the call graph as an Obsidian vault (open it,");
-      console.log("                           then Graph view) — nodes colored by your comprehension");
+      console.log("dk index|targets|questions|interview|teach|report|vault <repo> [n|symbol|out]");
+      console.log("  report <repo> [out.md]   write a markdown calibration report (gap + reading list)");
+      console.log("  vault <repo> [dir]       build the graphify Obsidian vault, colored by your");
+      console.log("                           comprehension (needs graphify: `pip install graphifyy`)");
       console.log("  --smart          grade with your own claude -p / codex (your sub, no API key)");
       console.log("  --level=<high|mid|low>   question altitude: high = design/why (default mid = blast-radius,");
       console.log("                           low = line-level mechanism). Aliases: --high, --low");
@@ -78,7 +82,8 @@ async function main(argv: string[]): Promise<number> {
     case "teach":
       return cmdTeach(repo, nArg, level);
     case "curve":
-      return cmdCurve(repo, nArg);
+    case "report":
+      return cmdReport(repo, nArg);
     case "vault":
     case "obsidian":
       return cmdVault(repo, nArg);
@@ -245,19 +250,10 @@ async function cmdTeach(repo: string, nameArg?: string, level: Level = "mid"): P
   return 0;
 }
 
-function cmdCurve(repo: string, outArg?: string): number {
-  const file = path.join(repo, ".dunning-kruger", "overlay.json");
-  if (!fs.existsSync(file)) return say("No saved run yet — run `dk interview` first.");
-  let runs: OverlayRun[];
-  try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    runs = Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return say("overlay.json is unreadable.");
-  }
-  const run = runs[runs.length - 1];
-  if (!run) return say("No runs recorded yet.");
-  const html = renderCurveHtml({
+function cmdReport(repo: string, outArg?: string): number {
+  const run = latestRun(repo);
+  if (!run) return say("No saved run yet — run `dk interview` first.");
+  const md = renderReportMarkdown({
     title: `Dunning Kruger — ${path.basename(path.resolve(repo))}`,
     date: run.date.slice(0, 10),
     selfPct: run.overall.selfPct,
@@ -266,63 +262,81 @@ function cmdCurve(repo: string, outArg?: string): number {
     zone: run.overall.zone,
     points: run.targets.map((t) => ({
       name: t.symbol,
-      selfPct: ((t.self - 1) / 4) * 100,
-      measuredPct: (t.measured / 5) * 100,
+      location: t.file,
+      self: t.self,
+      measured: t.measured,
+      missed: t.missed,
+      dimensions: t.dimensions,
     })),
   });
-  const out = outArg && !/^\d+$/.test(outArg) ? outArg : path.join(repo, ".dunning-kruger", "curve.html");
+  const out = outArg && !/^\d+$/.test(outArg) ? outArg : path.join(repo, ".dunning-kruger", "report.md");
   try {
     fs.mkdirSync(path.dirname(out), { recursive: true });
-    fs.writeFileSync(out, html);
-    console.log(`wrote ${out} — open it to see (and screenshot) your calibration.`);
+    fs.writeFileSync(out, md);
+    console.log(`wrote ${out} — your calibration report (open it in any markdown viewer).`);
   } catch (e) {
     return say(`couldn't write ${out}: ${(e as Error).message}`);
   }
   return 0;
 }
 
+// `dk vault` no longer hand-rolls an Obsidian export. graphify (github.com/safishamsi/graphify)
+// owns the graph: tree-sitter extraction, Leiden communities, and the vault itself. We run it
+// LLM-free, then overlay YOUR comprehension (dk/* tags + colorGroups) onto the notes it wrote.
 function cmdVault(repo: string, outArg?: string): number {
-  const g = indexRepo(repo);
-  if (!g.nodes.length) return say("No symbols found to map.");
+  const root = path.resolve(repo);
+  const out = outArg && !/^\d+$/.test(outArg) ? path.resolve(outArg) : path.join(root, ".dunning-kruger", "vault");
 
-  // Comprehension from the latest interview, if any — match overlay rows to graph nodes by
-  // (name, file:line). Absent → a structure-only vault (still a useful map).
+  const built = buildGraphifyVault(root, out);
+  if (!built.ok) return say(built.error);
+
+  // Scores keyed by joinKey(file, name) straight from the overlay (no re-index needed); the
+  // overlay rows already carry symbol name + "file:line".
   const scores: Record<string, SymbolScore> = {};
-  const overlay = path.join(g.repo, ".dunning-kruger", "overlay.json");
-  try {
-    const parsed = JSON.parse(fs.readFileSync(overlay, "utf8"));
-    const last = Array.isArray(parsed) ? (parsed as OverlayRun[])[parsed.length - 1] : undefined;
-    for (const t of last?.targets ?? []) {
-      const node = g.nodes.find((n) => n.name === t.symbol && `${n.file}:${n.line}` === t.file);
-      if (node) scores[node.id] = { score: t.measured, self: t.self, missed: t.missed, dimensions: t.dimensions };
-    }
-  } catch {
-    /* no overlay yet — structure-only vault */
+  const run = latestRun(root);
+  for (const t of run?.targets ?? []) {
+    const file = t.file.replace(/:\d+$/, ""); // "path/x.ts:42" -> "path/x.ts"
+    scores[joinKey(file, t.symbol)] = { score: t.measured, self: t.self, dimensions: t.dimensions };
   }
 
-  const sources: Record<string, string> = {};
-  for (const n of g.nodes) sources[n.id] = readSource(g.repo, n);
-
-  const out = outArg && !/^\d+$/.test(outArg) ? outArg : path.join(g.repo, ".dunning-kruger", "vault");
-  const files = buildVault(g, { scores, sources, repoName: path.basename(g.repo) });
-  try {
-    for (const f of files) {
-      const full = path.join(out, f.path);
-      fs.mkdirSync(path.dirname(full), { recursive: true });
-      fs.writeFileSync(full, f.content);
-    }
-  } catch (e) {
-    return say(`couldn't write the vault: ${(e as Error).message}`);
+  const res = overlayComprehension(out, scores);
+  console.log(`built the graphify vault at ${out} and overlaid your comprehension.`);
+  console.log(`  ${res.tagged} function(s) colored, ${res.untested} not yet tested.`);
+  if (res.unmatched.length) {
+    console.log(`  (${res.unmatched.length} score(s) matched no note — renamed/moved since the interview.)`);
   }
-  const tested = Object.keys(scores).length;
-  console.log(`wrote ${files.length} notes to ${out}`);
   console.log(
-    `open that folder as an Obsidian vault, then Graph view (Cmd/Ctrl+G).` +
-      (tested
-        ? ` ${tested} node(s) are colored by your comprehension.`
-        : ` Run \`dk interview\` and re-export to color nodes by comprehension.`),
+    Object.keys(scores).length
+      ? "open that folder as an Obsidian vault, then Graph view (Cmd/Ctrl+G) — red = black box."
+      : "open it as an Obsidian vault, then run `dk interview` and re-run `dk vault` to color it.",
   );
   return 0;
+}
+
+// Run graphify's three LLM-free steps: extract -> cluster (Leiden, --no-label so no LLM naming)
+// -> export the vault. graphify is a Python tool; we shell to it (GRAPHIFY_BIN overrides the path).
+function buildGraphifyVault(root: string, outDir: string): { ok: true } | { ok: false; error: string } {
+  const bin = process.env.GRAPHIFY_BIN || "graphify";
+  // Strip LLM API keys from graphify's env: every step we run is local/no-LLM, and the tool must
+  // never be able to reach a paid API on the user's behalf.
+  const run = (args: string[]) =>
+    execFileSync(bin, args, {
+      cwd: root,
+      stdio: ["ignore", "ignore", "pipe"],
+      encoding: "utf8",
+      env: llmFreeEnv(),
+    });
+  try {
+    run(["update", root, "--no-cluster", "--force"]);
+    run(["cluster-only", root, "--no-label", "--no-viz"]);
+    run(["export", "obsidian", "--dir", outDir]);
+    return { ok: true };
+  } catch (e) {
+    const msg = (e as { code?: string }).code === "ENOENT"
+      ? `graphify not found (looked for "${bin}"). Install it with \`pip install graphifyy\`, or set GRAPHIFY_BIN.`
+      : `graphify failed while building the vault: ${(e as Error).message}`;
+    return { ok: false, error: msg };
+  }
 }
 
 async function teachLoop(
@@ -439,6 +453,18 @@ interface OverlayRun {
     missed: string[];
     dimensions?: GradeResult["dimensions"];
   }[];
+}
+
+/** The most recent recorded interview, or undefined if none/unreadable. */
+function latestRun(repo: string): OverlayRun | undefined {
+  const file = path.join(path.resolve(repo), ".dunning-kruger", "overlay.json");
+  if (!fs.existsSync(file)) return undefined;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    return Array.isArray(parsed) ? (parsed as OverlayRun[])[parsed.length - 1] : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function persist(repo: string, answered: AnsweredTarget[], p: ReturnType<typeof placeOnCurve>): OverlayRun | undefined {
