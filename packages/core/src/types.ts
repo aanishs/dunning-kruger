@@ -47,6 +47,14 @@ export interface Target extends SymbolNode {
 
 export type QuestionType = "explain" | "null-param" | "trace-call";
 
+/**
+ * Question altitude — how high-level vs. low-level the interview probes.
+ *   high → design rationale & tradeoffs ("why this shape, what did you reject?") — technical-interview altitude
+ *   mid  → behavior / blast-radius / failure modes (the default)
+ *   low  → line-level mechanism ("walk the exact control flow")
+ */
+export type Level = "high" | "mid" | "low";
+
 export interface Question {
   targetId: string;
   type: QuestionType;

@@ -80,11 +80,36 @@ receipts either way — only the question set differs (whole repo vs. just the c
 1. **Pick 5 targets** — recently-changed, central (many callers), exported, or complex.
    Read each in full so questions and scoring are grounded.
 2. **Self-rate** — show the 5 targets; capture a 1-5 rating for each before any question.
-3. **Interview** — one code-grounded question per target, one at a time, wait for answers.
+3. **Interview** — one code-grounded question per target at the chosen altitude (see *Question
+   altitude* below — default: interview-style, not line-by-line), one at a time, wait for answers.
 4. **Score** — 0-5 with a receipt. See `sections/SCORING.md`.
 5. **Placement** — self% vs measured%, gap, zone. See `sections/CURVE.md`.
 6. **Persist + teach** — append the run to `.dunning-kruger/overlay.json`; offer the
    teaching loop on the weakest target. See `sections/TEACHING.md`.
+
+## Question altitude — interview, don't quiz
+
+Pitch every question at the level of a **technical interview about decisions**, not a quiz about
+syntax: *"why did you reach for a queue here instead of a direct call?"* — never *"what does line
+42 do?"* Three altitudes (the CLI mirrors them as `--level=high|mid|low`):
+
+- **high — design rationale.** Why is it shaped this way; what alternative was rejected; what does
+  this buy; where does it stop scaling. The most diagnostic altitude — understanding *why* is what
+  separates the author from a reader.
+- **mid — behavior & blast radius (default).** What it guarantees, what breaks downstream if it
+  changes, the failure paths. Where calibration lives.
+- **low — mechanism.** Walk the exact control flow, every branch, the specific edge cases.
+
+Default to **mid, leaning high** — that's the interview feel. Announce the altitude in one line and
+let the user redial anytime (*"go deeper" / "stay high-level"*); in ownership mode, skew to blast-radius.
+
+**Include at least one counterfactual — "why X and not Y?"** This is the single sharpest ownership
+signal, and it's the one thing the CLI *can't* do well: the CLI asks "what alternative did you pass
+on" generically, but **you understand the domain, so name the REAL alternative** they rejected —
+*"why DynamoDB and not Postgres for this table?"*, *"why a new endpoint instead of extending the
+existing one?"*, *"why poll instead of a webhook?"* A confident answer is the strongest proof of real
+ownership; a blank stare is the most useful gap. **Guardrail:** if the decision genuinely had a forced
+hand (only one viable option), say so and move on — don't manufacture a fake fork to score someone on.
 
 ## A second job: ownership
 

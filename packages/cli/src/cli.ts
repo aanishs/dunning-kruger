@@ -25,14 +25,29 @@ import {
   GradeResult,
   SymbolGraph,
   Matcher,
+  Level,
 } from "../../core/src/index";
 import { parseRatings } from "./parse";
 import { makeAgentMatcher } from "./grade/agent-matcher";
+
+// Question altitude from flags: --level=high|mid|low, with --high / --low shorthands.
+// All start with "--", so they're already stripped from positional parsing.
+function parseLevel(argv: string[]): Level {
+  const kv = argv.find((a) => a.startsWith("--level="));
+  if (kv) {
+    const v = kv.slice("--level=".length);
+    if (v === "high" || v === "mid" || v === "low") return v;
+  }
+  if (argv.includes("--high")) return "high";
+  if (argv.includes("--low")) return "low";
+  return "mid";
+}
 
 async function main(argv: string[]): Promise<number> {
   // `--smart` opts the standalone CLI into agent grading (shells to the user's own
   // claude -p / codex — their sub, no API key). Strip flags before positional parsing.
   const smart = argv.includes("--smart");
+  const level = parseLevel(argv);
   const [cmd, repoArg, nArg] = argv.filter((a) => !a.startsWith("--"));
   const repo = repoArg ?? process.cwd();
   const n = nArg ? parseInt(nArg, 10) : 5;
@@ -43,18 +58,20 @@ async function main(argv: string[]): Promise<number> {
     case "-h":
     case "--help":
       console.log("dk index|targets|questions|interview|teach|curve <repo> [n|symbol|out.html]");
-      console.log("  --smart   grade with your own claude -p / codex (your sub, no API key)");
+      console.log("  --smart          grade with your own claude -p / codex (your sub, no API key)");
+      console.log("  --level=<high|mid|low>   question altitude: high = design/why (default mid = blast-radius,");
+      console.log("                           low = line-level mechanism). Aliases: --high, --low");
       return 0;
     case "index":
       return cmdIndex(repo);
     case "targets":
       return cmdTargets(repo, n);
     case "questions":
-      return cmdQuestions(repo, n);
+      return cmdQuestions(repo, n, level);
     case "interview":
-      return cmdInterview(repo, n, smart);
+      return cmdInterview(repo, n, smart, level);
     case "teach":
-      return cmdTeach(repo, nArg);
+      return cmdTeach(repo, nArg, level);
     case "curve":
       return cmdCurve(repo, nArg);
     default:
@@ -88,12 +105,12 @@ function cmdTargets(repo: string, n: number): number {
   return 0;
 }
 
-function cmdQuestions(repo: string, n: number): number {
+function cmdQuestions(repo: string, n: number, level: Level = "mid"): number {
   const g = indexRepo(repo);
   const targets = pickTargets(g, n);
   if (!targets.length) return say("No rankable symbols found.");
   targets.forEach((t, i) => {
-    const [q] = generateQuestions(t, g);
+    const [q] = generateQuestions(t, g, level);
     console.log(`Q${i + 1} [${q.type}] ${q.prompt}`);
     for (const c of q.expectedConcepts) console.log(`     - ${c}`);
     console.log();
@@ -108,7 +125,12 @@ interface AnsweredTarget {
   selfRating: number;
 }
 
-async function cmdInterview(repo: string, n: number, smart = false): Promise<number> {
+async function cmdInterview(
+  repo: string,
+  n: number,
+  smart = false,
+  level: Level = "mid",
+): Promise<number> {
   const g = indexRepo(repo);
   const targets = pickTargets(g, n);
   if (!targets.length) return say("No rankable symbols found — repo too small to interview on.");
@@ -123,6 +145,14 @@ async function cmdInterview(repo: string, n: number, smart = false): Promise<num
       console.log("(--smart: no claude/codex CLI on PATH; using the keyword fallback)");
     }
   }
+  if (level === "high" && matcher === keywordMatcher) {
+    // Design-rationale answers barely echo identifiers, so the keyword floor can't grade them
+    // fairly. Be honest about it and point at the path that can.
+    console.log(
+      "(--level=high asks design/why questions; the keyword fallback can't grade those well —\n" +
+        " add --smart, or run the /dunning-kruger skill so your session model judges them.)",
+    );
+  }
 
   const reader = makeReader();
   console.log(`\nDunning Kruger — interviewing you on ${g.repo}`);
@@ -133,7 +163,7 @@ async function cmdInterview(repo: string, n: number, smart = false): Promise<num
 
   const answered: AnsweredTarget[] = [];
   for (let i = 0; i < targets.length; i++) {
-    const [question] = generateQuestions(targets[i], g);
+    const [question] = generateQuestions(targets[i], g, level);
     console.log(`\nQ${i + 1}/${targets.length}: ${question.prompt}`);
     const answer = await reader.ask("> ");
     let grade: GradeResult;
@@ -157,7 +187,7 @@ async function cmdInterview(repo: string, n: number, smart = false): Promise<num
     const yn = (await reader.ask(`\nWant to close the gap on ${weakest.target.name}? (y/n) `)).trim().toLowerCase();
     if (yn === "y" || yn === "yes") {
       // re-grade with the SAME matcher the interview used (keyword or --smart agent).
-      const regrade = await teachLoop(reader, g, weakest.target, matcher, weakest.grade.score);
+      const regrade = await teachLoop(reader, g, weakest.target, matcher, weakest.grade.score, level);
       // TEACHING.md: update the overlay if they re-score higher, so the over-time view reflects it.
       if (regrade.score > weakest.grade.score) updateOverlayScore(g.repo, weakest.target, regrade);
     }
@@ -190,7 +220,7 @@ function updateOverlayScore(repo: string, target: Target, grade: GradeResult): v
   }
 }
 
-async function cmdTeach(repo: string, nameArg?: string): Promise<number> {
+async function cmdTeach(repo: string, nameArg?: string, level: Level = "mid"): Promise<number> {
   const g = indexRepo(repo);
   let target: Target | undefined;
   // A non-numeric arg is a symbol name. Use a strict digits test, not isNaN(parseInt) —
@@ -202,7 +232,7 @@ async function cmdTeach(repo: string, nameArg?: string): Promise<number> {
   if (!target) target = pickTargets(g, 1)[0];
   if (!target) return say("No rankable symbols found.");
   const reader = makeReader();
-  await teachLoop(reader, g, target, keywordMatcher, undefined);
+  await teachLoop(reader, g, target, keywordMatcher, undefined, level);
   reader.close();
   return 0;
 }
@@ -249,6 +279,7 @@ async function teachLoop(
   target: Target,
   matcher: Matcher,
   priorScore?: number,
+  level: Level = "mid",
 ): Promise<GradeResult> {
   const lesson = buildLesson(target, g, readSource(g.repo, target));
   console.log(`\n${"=".repeat(60)}\nLet's close the gap on ${lesson.name} (${lesson.location})\n${"=".repeat(60)}`);
@@ -258,7 +289,7 @@ async function teachLoop(
   for (const b of lesson.breakdown) console.log(`  • ${b}`);
 
   const back = await reader.ask(`\n${lesson.explainBackPrompt}\n> `);
-  const [q] = generateQuestions(target, g);
+  const [q] = generateQuestions(target, g, level);
   let regrade: GradeResult;
   try {
     regrade = await matcher.grade(back, q);

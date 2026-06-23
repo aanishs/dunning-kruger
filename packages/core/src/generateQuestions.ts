@@ -6,9 +6,13 @@
 // session model judges comprehension SEMANTICALLY against the real code — the concept set
 // does not constrain it.
 
-import { SymbolGraph, SymbolNode, Question } from "./types";
+import { SymbolGraph, SymbolNode, Question, Level } from "./types";
 
-export function generateQuestions(target: SymbolNode, graph: SymbolGraph): Question[] {
+export function generateQuestions(
+  target: SymbolNode,
+  graph: SymbolGraph,
+  level: Level = "mid",
+): Question[] {
   const byId = new Map(graph.nodes.map((n) => [n.id, n] as const));
   const calleeNames = target.callees.map((id) => byId.get(id)?.name ?? stripId(id));
 
@@ -22,18 +26,41 @@ export function generateQuestions(target: SymbolNode, graph: SymbolGraph): Quest
     );
   }
 
-  // Ownership / blast-radius questions, not "name the callees". The expectedConcepts above
-  // stay identifier-level (the CLI keyword fallback grades against them); in skill mode the
-  // agent judges the answer semantically against the real code regardless of phrasing.
+  // Ownership / decision questions, not "name the callees". The expectedConcepts above stay
+  // identifier-level (the CLI keyword fallback grades against them); in skill mode the agent
+  // judges the answer semantically against the real code regardless of phrasing. The `level`
+  // dial sets ALTITUDE: high = design rationale (the "why Dynamo not SQL" technical-interview
+  // altitude), mid = behavior/blast-radius (default), low = line-level mechanism.
   // v1 ships one question per target (5 targets = the 5-question interview).
   const callerNames = graph.nodes.filter((n) => n.callees.includes(target.id)).map((n) => n.name);
   const where = `(${target.file}:${target.line})`;
+  const who = callerNames.slice(0, 3).join(", ");
 
   let prompt: string;
   let type: Question["type"];
-  if (callerNames.length >= 1) {
+
+  if (level === "high") {
+    // Design-rationale altitude: interrogate the DECISION, not the mechanism. The substrate
+    // can't know your specific alternative (SQL vs Dynamo), so it points the same kind of
+    // "why this, not that?" question at the real symbol.
+    type = "explain";
+    const leans = calleeNames.length ? ` It leans on ${calleeNames.slice(0, 3).join(", ")}.` : "";
+    prompt =
+      `Step back from the implementation of \`${target.name}\`.${leans} Why is it shaped this ` +
+      `way — what alternative design did you pass on, what does this one buy you, and where ` +
+      `would it stop holding up? ${where}`;
+  } else if (level === "low") {
+    // Mechanism altitude: walk the exact control flow, line by line.
+    type = "trace-call";
+    const branches =
+      target.branchCount > 0
+        ? `, naming each of its ${target.branchCount} branch${target.branchCount > 1 ? "es" : ""} and when it's taken`
+        : "";
+    const forParam = target.params[0] ? ` for a representative \`${target.params[0]}\`` : "";
+    prompt =
+      `Walk the exact control flow of \`${target.name}\` from start to finish${branches}${forParam}. ${where}`;
+  } else if (callerNames.length >= 1) {
     type = "trace-call"; // blast-radius
-    const who = callerNames.slice(0, 3).join(", ");
     prompt =
       `\`${target.name}\` is called by ${who}. If you changed what it returns or how it ` +
       `behaves, what downstream breaks — and what does it lean on to do its job? ${where}`;

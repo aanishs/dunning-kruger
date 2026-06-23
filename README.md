@@ -42,6 +42,14 @@ It sits you down and asks you to explain your own code &mdash; from memory, no p
 checks your answers against what the code actually does and shows you, plainly, where you were
 fooling yourself, and exactly what to go read.
 
+The questions are a **technical interview about your decisions, not a quiz about syntax** &mdash;
+closer to *"why did you reach for DynamoDB instead of Postgres here?"* than *"what does line 42
+do?"* That one-sharp-question-at-a-time framing is borrowed from
+[Matt Pocock's `grill-me`](https://github.com/mattpocock/skills) (MIT), pointed at code you've
+already written instead of a plan you're about to. And you can dial how high- or low-level it
+probes: `--level=high` for pure design rationale (and *"what alternative did you reject?"*),
+`--level=low` to walk the exact control flow, with the default sitting in between.
+
 ```text
 $ dk interview ./my-app
 

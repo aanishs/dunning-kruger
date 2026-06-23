@@ -64,6 +64,38 @@ describe("grading (deterministic keyword matcher)", () => {
   });
 });
 
+describe("question altitude (the --level dial)", () => {
+  const g = indexRepo(FIX);
+  const clamp = g.nodes.find((n) => n.name === "clamp")!;
+  const [high] = generateQuestions(clamp, g, "high");
+  const [mid] = generateQuestions(clamp, g, "mid");
+  const [low] = generateQuestions(clamp, g, "low");
+
+  it("high altitude asks for the rejected alternative (design rationale, not mechanism)", () => {
+    expect(high.prompt.toLowerCase()).toContain("alternative");
+    expect(high.prompt.toLowerCase()).not.toContain("walk the exact control flow");
+  });
+
+  it("low altitude asks to walk the exact control flow (mechanism, not design)", () => {
+    expect(low.prompt.toLowerCase()).toContain("control flow");
+    expect(low.prompt.toLowerCase()).not.toContain("alternative");
+  });
+
+  it("the three altitudes are distinct prompts", () => {
+    expect(new Set([high.prompt, mid.prompt, low.prompt]).size).toBe(3);
+  });
+
+  it("the keyword rubric is altitude-independent (concepts come from the code, not the question)", () => {
+    expect(high.expectedConcepts).toEqual(mid.expectedConcepts);
+    expect(low.expectedConcepts).toEqual(mid.expectedConcepts);
+  });
+
+  it("defaults to mid when no level is given", () => {
+    const [def] = generateQuestions(clamp, g);
+    expect(def.prompt).toBe(mid.prompt);
+  });
+});
+
 describe("dunning-kruger placement", () => {
   it("flags overconfidence honestly (no meme labels)", () => {
     // rated self 5/5 everywhere, measured 1/5 -> big positive gap, low competence
