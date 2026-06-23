@@ -1,0 +1,24 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: typecheck
+        run: npm run typecheck
+      - name: test (includes the T10 comprehension-contract eval)
+        run: npm test
+        # The semantic grader is the chat session model (or a CLI shelling to claude -p /
+        # codex exec — never a raw API key), so it isn't unit-tested here. This eval pins the
+        # contract + proves the keyword fallback is only a recall smoke-test.

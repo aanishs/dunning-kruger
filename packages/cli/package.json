@@ -1,0 +1,19 @@
+{
+  "name": "@dunning-kruger/cli",
+  "version": "0.0.0",
+  "description": "dk — the Dunning Kruger command line.",
+  "license": "MIT",
+  "author": "Aanish Sachdev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aanishs/dunning-kruger.git",
+    "directory": "packages/cli"
+  },
+  "bin": {
+    "dk": "bin/dk.mjs"
+  },
+  "main": "src/cli.ts",
+  "dependencies": {
+    "@dunning-kruger/core": "0.0.0"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "dunning-kruger-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "The AI interviews you about your own codebase and plots your Dunning-Kruger gap.",
+  "license": "MIT",
+  "author": "Aanish Sachdev",
+  "homepage": "https://github.com/aanishs/dunning-kruger#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aanishs/dunning-kruger.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aanishs/dunning-kruger/issues"
+  },
+  "keywords": [
+    "dunning-kruger",
+    "code-comprehension",
+    "developer-tools",
+    "claude-code",
+    "ai-coding",
+    "static-analysis",
+    "typescript",
+    "code-review",
+    "metacognition"
+  ],
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dk": "tsx packages/cli/src/cli.ts",
+    "typecheck": "tsc -b && tsc --noEmit -p packages/cli/tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

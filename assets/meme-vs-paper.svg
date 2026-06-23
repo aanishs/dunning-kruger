@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 400" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif">
+  <rect x="0" y="0" width="760" height="400" rx="16" fill="#0f1115"/>
+  <text x="32" y="40" fill="#e7e9ee" font-size="20" font-weight="700">The Dunning&#8211;Kruger effect</text>
+  <text x="32" y="62" fill="#8b93a3" font-size="13">the curve everyone posts &#8212; vs. what the 1999 paper actually found</text>
+
+  <!-- ===== LEFT: the meme ===== -->
+  <text x="45" y="96" fill="#9aa3b2" font-size="13" font-weight="600">the meme  <tspan fill="#ff5c5c">&#10007; not in the paper</tspan></text>
+  <!-- axes -->
+  <line x1="45" y1="320" x2="360" y2="320" stroke="#2b313c"/>
+  <line x1="45" y1="110" x2="45" y2="320" stroke="#2b313c"/>
+  <text x="200" y="342" fill="#6b7280" font-size="11" text-anchor="middle">experience &#8594;</text>
+  <text x="38" y="215" fill="#6b7280" font-size="11" text-anchor="middle" transform="rotate(-90 38 215)">confidence &#8594;</text>
+  <!-- the Mount Stupid curve -->
+  <path d="M 50,300 C 64,294 72,128 88,118 C 104,110 132,278 158,282 C 205,288 295,182 358,150"
+        fill="none" stroke="#555b66" stroke-width="2.5" stroke-dasharray="6 5"/>
+  <circle cx="88" cy="118" r="3.5" fill="#555b66"/>
+  <text x="92" y="112" fill="#7a8290" font-size="10.5">&#8220;Mount Stupid&#8221;</text>
+  <circle cx="158" cy="282" r="3.5" fill="#555b66"/>
+  <text x="120" y="300" fill="#7a8290" font-size="10.5">&#8220;Valley of Despair&#8221;</text>
+
+  <!-- ===== RIGHT: the paper ===== -->
+  <text x="410" y="96" fill="#9aa3b2" font-size="13" font-weight="600">the paper  <tspan fill="#5fd08a">&#10003; perceived vs. actual</tspan></text>
+  <!-- axes -->
+  <line x1="410" y1="320" x2="725" y2="320" stroke="#2b313c"/>
+  <line x1="410" y1="110" x2="410" y2="320" stroke="#2b313c"/>
+  <text x="567" y="342" fill="#6b7280" font-size="11" text-anchor="middle">your actual skill (worst &#8594; best) &#8594;</text>
+  <text x="403" y="215" fill="#6b7280" font-size="11" text-anchor="middle" transform="rotate(-90 403 215)">percentile</text>
+
+  <!-- actual ability (steep, the truth) -->
+  <polyline points="410,287 515,232 620,178 725,118" fill="none" stroke="#7aa2ff" stroke-width="3"/>
+  <!-- perceived ability (relatively flat) -->
+  <polyline points="410,177 515,175 620,162 725,153" fill="none" stroke="#ff8a4c" stroke-width="3"/>
+
+  <!-- the bottom-quartile gap -->
+  <line x1="410" y1="177" x2="410" y2="287" stroke="#ff8a4c" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.8"/>
+  <circle cx="410" cy="177" r="4" fill="#ff8a4c"/>
+  <circle cx="410" cy="287" r="4" fill="#7aa2ff"/>
+  <text x="420" y="234" fill="#aeb6c4" font-size="10.5">felt 62nd &#8230;</text>
+  <text x="420" y="248" fill="#aeb6c4" font-size="10.5">scored 12th</text>
+
+  <!-- legend -->
+  <rect x="560" y="124" width="12" height="3" fill="#ff8a4c"/>
+  <text x="578" y="128" fill="#8b93a3" font-size="10.5">what you think you are</text>
+  <rect x="560" y="140" width="12" height="3" fill="#7aa2ff"/>
+  <text x="578" y="144" fill="#8b93a3" font-size="10.5">what you actually are</text>
+
+  <!-- caption -->
+  <text x="32" y="384" fill="#aeb6c4" font-size="12">Low performers overestimate the most &#8212; the skill to notice you&#8217;re wrong is the very skill you&#8217;re missing.  <tspan fill="#6b7280">Kruger &amp; Dunning, 1999.</tspan></text>
+</svg>
