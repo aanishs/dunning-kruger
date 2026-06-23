@@ -20,10 +20,13 @@ import {
   placeOnCurve,
   buildLesson,
   renderCurveHtml,
+  buildVault,
   Target,
   Question,
   GradeResult,
   SymbolGraph,
+  SymbolNode,
+  SymbolScore,
   Matcher,
   Level,
 } from "../../core/src/index";
@@ -57,7 +60,9 @@ async function main(argv: string[]): Promise<number> {
     case "help":
     case "-h":
     case "--help":
-      console.log("dk index|targets|questions|interview|teach|curve <repo> [n|symbol|out.html]");
+      console.log("dk index|targets|questions|interview|teach|curve|vault <repo> [n|symbol|out]");
+      console.log("  vault <repo> [dir]       export the call graph as an Obsidian vault (open it,");
+      console.log("                           then Graph view) — nodes colored by your comprehension");
       console.log("  --smart          grade with your own claude -p / codex (your sub, no API key)");
       console.log("  --level=<high|mid|low>   question altitude: high = design/why (default mid = blast-radius,");
       console.log("                           low = line-level mechanism). Aliases: --high, --low");
@@ -74,6 +79,9 @@ async function main(argv: string[]): Promise<number> {
       return cmdTeach(repo, nArg, level);
     case "curve":
       return cmdCurve(repo, nArg);
+    case "vault":
+    case "obsidian":
+      return cmdVault(repo, nArg);
     default:
       console.error(`unknown command: ${cmd}`);
       return 1;
@@ -273,6 +281,50 @@ function cmdCurve(repo: string, outArg?: string): number {
   return 0;
 }
 
+function cmdVault(repo: string, outArg?: string): number {
+  const g = indexRepo(repo);
+  if (!g.nodes.length) return say("No symbols found to map.");
+
+  // Comprehension from the latest interview, if any — match overlay rows to graph nodes by
+  // (name, file:line). Absent → a structure-only vault (still a useful map).
+  const scores: Record<string, SymbolScore> = {};
+  const overlay = path.join(g.repo, ".dunning-kruger", "overlay.json");
+  try {
+    const parsed = JSON.parse(fs.readFileSync(overlay, "utf8"));
+    const last = Array.isArray(parsed) ? (parsed as OverlayRun[])[parsed.length - 1] : undefined;
+    for (const t of last?.targets ?? []) {
+      const node = g.nodes.find((n) => n.name === t.symbol && `${n.file}:${n.line}` === t.file);
+      if (node) scores[node.id] = { score: t.measured, self: t.self, missed: t.missed };
+    }
+  } catch {
+    /* no overlay yet — structure-only vault */
+  }
+
+  const sources: Record<string, string> = {};
+  for (const n of g.nodes) sources[n.id] = readSource(g.repo, n);
+
+  const out = outArg && !/^\d+$/.test(outArg) ? outArg : path.join(g.repo, ".dunning-kruger", "vault");
+  const files = buildVault(g, { scores, sources, repoName: path.basename(g.repo) });
+  try {
+    for (const f of files) {
+      const full = path.join(out, f.path);
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, f.content);
+    }
+  } catch (e) {
+    return say(`couldn't write the vault: ${(e as Error).message}`);
+  }
+  const tested = Object.keys(scores).length;
+  console.log(`wrote ${files.length} notes to ${out}`);
+  console.log(
+    `open that folder as an Obsidian vault, then Graph view (Cmd/Ctrl+G).` +
+      (tested
+        ? ` ${tested} node(s) are colored by your comprehension.`
+        : ` Run \`dk interview\` and re-export to color nodes by comprehension.`),
+  );
+  return 0;
+}
+
 async function teachLoop(
   reader: ReturnType<typeof makeReader>,
   g: SymbolGraph,
@@ -308,10 +360,10 @@ async function teachLoop(
   return regrade;
 }
 
-function readSource(repo: string, target: Target): string {
+function readSource(repo: string, node: SymbolNode): string {
   try {
-    const lines = fs.readFileSync(path.join(repo, target.file), "utf8").split("\n");
-    return lines.slice(target.line - 1, target.endLine).join("\n");
+    const lines = fs.readFileSync(path.join(repo, node.file), "utf8").split("\n");
+    return lines.slice(node.line - 1, node.endLine).join("\n");
   } catch {
     return "(source unavailable)";
   }

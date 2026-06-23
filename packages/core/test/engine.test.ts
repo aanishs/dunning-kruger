@@ -7,6 +7,7 @@ import { keywordMatcher } from "../src/grade/keyword-matcher";
 import { placeOnCurve } from "../src/curve";
 import { buildLesson } from "../src/teach";
 import { renderCurveHtml } from "../src/render/curve-html";
+import { buildVault } from "../src/render/obsidian";
 import type { Question } from "../src/types";
 
 const FIX = path.join(__dirname, "fixture");
@@ -183,6 +184,50 @@ describe("teaching loop (buildLesson)", () => {
     expect(text).toContain("formatMoney");
     expect(text).toMatch(/order/); // the parameter
     expect(lesson.explainBackPrompt.toLowerCase()).toContain("explain");
+  });
+});
+
+describe("obsidian vault export", () => {
+  const g = indexRepo(FIX);
+  const files = buildVault(g);
+  const noteFor = (name: string, fs = files) =>
+    fs.find((f) => new RegExp(`^# ${name}$`, "m").test(f.content));
+
+  it("emits a note per symbol plus _Home and a graph color config", () => {
+    expect(files.some((f) => f.path === "_Home.md")).toBe(true);
+    expect(files.some((f) => f.path === ".obsidian/graph.json")).toBe(true);
+    const notes = files.filter((f) => f.path.endsWith(".md") && f.path !== "_Home.md");
+    expect(notes.length).toBe(g.nodes.length);
+  });
+
+  it("renders call edges as wikilinks (priceOrder -> clamp, formatMoney)", () => {
+    const note = noteFor("priceOrder")!;
+    expect(note.content).toMatch(/\[\[[^\]]*\|clamp\]\]/);
+    expect(note.content).toMatch(/\[\[[^\]]*\|formatMoney\]\]/);
+  });
+
+  it("tags untested nodes dk/untested", () => {
+    expect(noteFor("clamp")!.content).toContain("dk/untested");
+  });
+
+  it("colors a node by comprehension score and shows the felt-vs-showed receipt", () => {
+    const clamp = g.nodes.find((n) => n.name === "clamp")!;
+    const scored = buildVault(g, { scores: { [clamp.id]: { score: 0, self: 5 } } });
+    const note = noteFor("clamp", scored)!;
+    expect(note.content).toContain("dk/blackbox");
+    expect(note.content).toContain("you felt 5/5, you showed 0/5");
+  });
+
+  it("the graph config maps comprehension tags to colors", () => {
+    const cfg = JSON.parse(files.find((f) => f.path === ".obsidian/graph.json")!.content);
+    const queries = cfg.colorGroups.map((c: { query: string }) => c.query);
+    expect(queries).toContain("tag:#dk/blackbox");
+    expect(queries).toContain("tag:#dk/understood");
+  });
+
+  it("produces unique note paths", () => {
+    const paths = files.filter((f) => f.path.endsWith(".md")).map((f) => f.path);
+    expect(new Set(paths).size).toBe(paths.length);
   });
 });
 

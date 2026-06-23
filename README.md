@@ -87,6 +87,16 @@ shows you the climb. Run `dk curve` and it writes a shareable HTML card of where
 
 Either way it shows its work, down to the line, so you can argue with it.
 
+## See your black boxes &mdash; as a knowledge graph
+
+`dk vault ./my-app` exports your repo as an **Obsidian vault**: one note per function, every
+`[[wikilink]]` a call edge, and the folders become your **domains**. Open it in Obsidian, hit
+*Graph view*, and you're looking at the shape of your codebase. The twist: each node is **colored
+by how well you explained it** &mdash; 🔴 black box, 🟠 shaky, 🟢 understood, ⚪ not yet tested.
+So your comprehension gaps light up *on the actual structure of your code*. Interview more, and more
+of the graph turns green. (We render nothing &mdash; Obsidian is the dashboard; we just emit
+markdown + a graph color-config.)
+
 ## A second job: ownership
 
 Beyond "how well do I know this repo," there's the more useful question right before you ship:
@@ -114,6 +124,7 @@ Or the standalone CLI, no session needed (`--smart` grades via your own `claude`
 
 ```bash
 npm i && npm run dk -- interview /path/to/your/ts/repo
+npm run dk -- vault /path/to/your/ts/repo     # export the Obsidian comprehension graph
 ```
 
 ---

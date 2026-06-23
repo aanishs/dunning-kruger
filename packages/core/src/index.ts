@@ -22,3 +22,5 @@ export { buildLesson } from "./teach";
 export { goldenCases, runEval, passesComprehensionContract } from "./eval/golden";
 export { renderCurveHtml } from "./render/curve-html";
 export type { CurveData, CurvePoint } from "./render/curve-html";
+export { buildVault } from "./render/obsidian";
+export type { VaultFile, VaultOptions, SymbolScore } from "./render/obsidian";

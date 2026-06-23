@@ -86,6 +86,10 @@ receipts either way — only the question set differs (whole repo vs. just the c
 5. **Placement** — self% vs measured%, gap, zone. See `sections/CURVE.md`.
 6. **Persist + teach** — append the run to `.dunning-kruger/overlay.json`; offer the
    teaching loop on the weakest target. See `sections/TEACHING.md`.
+7. **Offer the map** — once a run exists, offer `dk vault <repo>`: it exports the codebase as an
+   Obsidian vault (note per function, `[[wikilinks]]` = call edges, folders = domains) with nodes
+   **colored by the comprehension scores you just produced** — your black boxes, lit up on the
+   real structure of the code. A nice "see your gaps" close; skip if they're not Obsidian users.
 
 ## Question altitude — interview, don't quiz
 
