@@ -294,7 +294,7 @@ function cmdVault(repo: string, outArg?: string): number {
     const last = Array.isArray(parsed) ? (parsed as OverlayRun[])[parsed.length - 1] : undefined;
     for (const t of last?.targets ?? []) {
       const node = g.nodes.find((n) => n.name === t.symbol && `${n.file}:${n.line}` === t.file);
-      if (node) scores[node.id] = { score: t.measured, self: t.self, missed: t.missed };
+      if (node) scores[node.id] = { score: t.measured, self: t.self, missed: t.missed, dimensions: t.dimensions };
     }
   } catch {
     /* no overlay yet — structure-only vault */
@@ -376,11 +376,26 @@ function printResults(answered: AnsweredTarget[], p: ReturnType<typeof placeOnCu
     const measPct = Math.round((a.grade.score / 5) * 100);
     console.log(`\n${a.target.name} (${a.target.file}:${a.target.line})`);
     console.log(`  you rated ${a.selfRating}/5 (${selfPct}%)  ·  measured ${a.grade.score}/5 (${measPct}%)`);
+    const facets = formatDimensions(a.grade.dimensions);
+    if (facets) console.log(`  facets: ${facets}`);
     if (a.grade.covered.length) console.log(`  ✓ you covered: ${a.grade.covered.join("; ")}`);
     if (a.grade.missed.length) console.log(`  → to learn:    ${a.grade.missed.join("; ")}`);
     console.log(`  next: ${a.grade.learnNext}`);
   }
   printCurve(p);
+}
+
+const DIMENSION_LABELS: Record<string, string> = {
+  mechanism: "mechanism",
+  failureModes: "failure-modes",
+  blastRadius: "blast-radius",
+  rationale: "rationale",
+};
+
+function formatDimensions(dims?: GradeResult["dimensions"]): string {
+  if (!dims) return "";
+  const parts = Object.entries(dims).map(([k, v]) => `${DIMENSION_LABELS[k] ?? k} ${v}/5`);
+  return parts.join(" · ");
 }
 
 function printCurve(p: ReturnType<typeof placeOnCurve>): void {
@@ -416,7 +431,14 @@ function printVerdict(answered: AnsweredTarget[]): void {
 interface OverlayRun {
   date: string;
   overall: { selfPct: number; measuredPct: number; gap: number; zone: string };
-  targets: { symbol: string; file: string; self: number; measured: number; missed: string[] }[];
+  targets: {
+    symbol: string;
+    file: string;
+    self: number;
+    measured: number;
+    missed: string[];
+    dimensions?: GradeResult["dimensions"];
+  }[];
 }
 
 function persist(repo: string, answered: AnsweredTarget[], p: ReturnType<typeof placeOnCurve>): OverlayRun | undefined {
@@ -456,6 +478,7 @@ function persist(repo: string, answered: AnsweredTarget[], p: ReturnType<typeof 
       self: a.selfRating,
       measured: a.grade.score,
       missed: a.grade.missed,
+      ...(a.grade.dimensions ? { dimensions: a.grade.dimensions } : {}),
     })),
   };
   try {

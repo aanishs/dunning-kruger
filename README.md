@@ -77,8 +77,9 @@ shows you the climb. Run `dk curve` and it writes a shareable HTML card of where
 > **It never sends your code to an API key you don't already own.**
 
 - **In a Claude session** (`/dunning-kruger`): the model already in your session is the judge.
-  It reads your real code and grades *comprehension* &mdash; mechanism, invariants, failure modes,
-  blast radius &mdash; not whether you parroted the function names. This is the smart path.
+  It reads your real code and scores **four facets of comprehension &mdash; mechanism, failure
+  modes, blast radius, and design rationale &mdash; each 0&ndash;5** (not one flat number, and not
+  whether you parroted the function names), rolled up into an overall. This is the smart path.
 - **Standalone CLI** (`dk`): a deterministic keyword check by default &mdash; honest as a *recall
   smoke-test*, not real understanding. Add `--smart` and it shells out to your *own*
   `claude -p` / `codex` (your subscription, **no third-party key**) for real grading. ("No key"

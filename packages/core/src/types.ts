@@ -67,9 +67,22 @@ export interface Question {
   expectedConcepts: string[];
 }
 
+/**
+ * The facets of understanding a comprehensive grade breaks out (vs. one flat scalar).
+ * These ARE the question altitudes: mechanism = low, failureModes/blastRadius = mid,
+ * rationale = high. A single question won't probe all four; absent facets are just unscored.
+ */
+export type Dimension = "mechanism" | "failureModes" | "blastRadius" | "rationale";
+
 export interface GradeResult {
-  /** 0-5. */
+  /** Overall 0-5 — the holistic roll-up the curve, buckets, and overlay all read. */
   score: number;
+  /**
+   * Per-facet 0-5 breakdown from the SEMANTIC judge (skill / `--smart`). Omitted by the keyword
+   * fallback (it grades recall, not facets). A facet the question didn't call for is left out
+   * rather than scored 0 — so the breakdown never penalizes a dimension nobody asked about.
+   */
+  dimensions?: Partial<Record<Dimension, number>>;
   covered: string[];
   missed: string[];
   /** Growth-not-gotcha: the one thing to learn next (never "you failed"). */

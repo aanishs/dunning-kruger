@@ -6,7 +6,7 @@
 // "emit a static artifact, no server/JS" lane (same as render/curve-html.ts). Pure: data in,
 // files out. The CLI reads the overlay + source spans and writes what this returns to disk.
 
-import { SymbolGraph } from "../types";
+import { SymbolGraph, Dimension } from "../types";
 
 export interface VaultFile {
   /** vault-relative path, e.g. "src/billing/invoice/createInvoice.md". */
@@ -19,9 +19,18 @@ export interface SymbolScore {
   score: number;
   /** Self-rating, 1-5, if captured. */
   self?: number;
+  /** Per-facet 0-5 breakdown (semantic grader only). */
+  dimensions?: Partial<Record<Dimension, number>>;
   question?: string;
   missed?: string[];
 }
+
+const DIMENSION_LABELS: Record<Dimension, string> = {
+  mechanism: "mechanism",
+  failureModes: "failure modes",
+  blastRadius: "blast radius",
+  rationale: "rationale",
+};
 
 export interface VaultOptions {
   /** Comprehension by SymbolNode.id (from an interview overlay). Absent → a structure-only vault. */
@@ -97,7 +106,12 @@ export function buildVault(graph: SymbolGraph, opts: VaultOptions = {}): VaultFi
     if (sc) {
       body.push("## Your comprehension", "");
       const felt = sc.self !== undefined ? `you felt ${sc.self}/5, ` : "";
-      body.push(`**${felt}you showed ${sc.score}/5.**`, "");
+      body.push(`**${felt}you showed ${sc.score}/5 overall.**`, "");
+      const dims = sc.dimensions ?? {};
+      const facets = (Object.keys(DIMENSION_LABELS) as Dimension[])
+        .filter((d) => dims[d] !== undefined)
+        .map((d) => `- ${DIMENSION_LABELS[d]}: ${dims[d]}/5`);
+      if (facets.length) body.push("", ...facets, "");
       if (sc.question) body.push(`> ${sc.question}`, "");
       if (sc.missed?.length) body.push(`Still to nail: ${sc.missed.join("; ")}`, "");
       body.push("");

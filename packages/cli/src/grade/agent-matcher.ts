@@ -42,8 +42,14 @@ export function buildJudgePrompt(answer: string, question: Question): string {
   return [
     "You are grading a developer on how well they understand their OWN code. Grade SEMANTICALLY,",
     "not by keyword overlap. Read the code referenced in the question (it's in this repo), then",
-    "judge whether the answer shows real understanding: mechanism, invariants, failure modes,",
-    "blast radius. Do NOT reward keyword-stuffing. Do NOT punish a correct explanation that avoids",
+    "judge real understanding across FOUR facets, each 0-5 (or null if the question genuinely",
+    "didn't call for it — do NOT score a facet nobody asked about):",
+    "  - mechanism:    what it does and how — control flow, data transforms, the happy path",
+    "  - failureModes: what breaks — edge cases, nulls, errors, the unhappy paths",
+    "  - blastRadius:  what depends on it / what it leans on — downstream effects of a change",
+    "  - rationale:    WHY it's shaped this way — tradeoffs, the alternative they rejected",
+    "Then give an overall 0-5 (your holistic judgment — a critical blind spot can sink it below the",
+    "facet average). Do NOT reward keyword-stuffing. Do NOT punish a correct explanation that avoids",
     "the literal identifier names. Tone: growth, not gotcha.",
     "",
     `QUESTION: ${question.prompt}`,
@@ -55,19 +61,45 @@ export function buildJudgePrompt(answer: string, question: Question): string {
     answer || "(no answer)",
     "ANSWER>>>",
     "",
-    'Respond with ONLY a JSON object, no prose, no code fence:',
-    '{"score": <integer 0-5>, "covered": ["..."], "missed": ["..."], "learnNext": "the one thing to read next", "reason": "one line"}',
+    "Respond with ONLY a JSON object, no prose, no code fence:",
+    '{"score": <integer 0-5>, "dimensions": {"mechanism": <0-5 or null>, "failureModes": <0-5 or null>,' +
+      ' "blastRadius": <0-5 or null>, "rationale": <0-5 or null>}, "covered": ["..."], "missed": ["..."],' +
+      ' "learnNext": "the one thing to read next", "reason": "one line"}',
   ].join("\n");
+}
+
+const DIMENSION_KEYS = ["mechanism", "failureModes", "blastRadius", "rationale"] as const;
+
+function clampScore(n: unknown): number | undefined {
+  if (n === null || n === undefined) return undefined; // Number(null) is 0 — drop null facets, don't score them 0
+  const v = Math.round(Number(n));
+  return Number.isFinite(v) ? Math.max(0, Math.min(5, v)) : undefined;
 }
 
 export function parseVerdict(out: string): GradeResult {
   const json = extractJsonObject(out);
   if (!json) throw new Error("no JSON verdict in tool output");
   const v = JSON.parse(json) as Record<string, unknown>;
-  const score = Math.max(0, Math.min(5, Math.round(Number(v.score))));
-  if (!Number.isFinite(score)) throw new Error("verdict has no usable score");
+
+  const dims: Partial<Record<(typeof DIMENSION_KEYS)[number], number>> = {};
+  const rawDims = (v.dimensions ?? {}) as Record<string, unknown>;
+  for (const k of DIMENSION_KEYS) {
+    const s = clampScore(rawDims[k]);
+    if (s !== undefined) dims[k] = s; // null / missing facet → unscored, not 0
+  }
+
+  // Prefer the model's holistic overall; fall back to the facet average so a verdict that only
+  // returned dimensions still scores.
+  let score = clampScore(v.score);
+  if (score === undefined) {
+    const present = Object.values(dims);
+    if (present.length) score = Math.round(present.reduce((a, b) => a + b, 0) / present.length);
+  }
+  if (score === undefined) throw new Error("verdict has no usable score");
+
   return {
     score,
+    ...(Object.keys(dims).length ? { dimensions: dims } : {}),
     covered: Array.isArray(v.covered) ? v.covered.map(String) : [],
     missed: Array.isArray(v.missed) ? v.missed.map(String) : [],
     learnNext: typeof v.learnNext === "string" ? v.learnNext : "",

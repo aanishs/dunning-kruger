@@ -10,24 +10,34 @@ against the real code you read in step 1.
 
 **Grade comprehension, not identifier recall.** A correct paraphrase that never names the
 helper functions can still be a 5; naming every callee while missing what the function
-guarantees is not a 5. Judge whether the answer actually demonstrates:
+guarantees is not a 5.
 
-- **Mechanism** — what it does, in order.
-- **Invariants** — what it guarantees / assumes.
-- **Failure modes** — what breaks if a param is null / empty / unexpected.
-- **Blast radius** — what else breaks if you change it (use the callers + callees from the
-  graph: "summarize calls this, so changing the return breaks the summary line").
-- **The why** — where it's inferable from the code.
+**Score four facets, each 0-5 — not one flat number.** A single scalar can't say whether they
+get *what it does* but are blind to *what breaks it*. Score each facet the answer engaged with;
+mark a facet **n/a** if the question genuinely didn't call for it (don't score a facet nobody
+asked about — that just punishes focus):
 
-Then emit 0-5 + a receipt grounded in `file:line`:
+- **mechanism** — what it does and how, in order; the invariants it assumes/guarantees.
+- **failureModes** — what breaks if a param is null / empty / unexpected; the unhappy paths.
+- **blastRadius** — what else breaks if you change it (use the callers + callees from the graph:
+  "summarize calls this, so changing the return breaks the summary line").
+- **rationale** — *why* it's shaped this way; the alternative they'd have rejected (where inferable).
+
+Then give an **overall 0-5** — a holistic roll-up, NOT a blind average: a critical blind spot
+(e.g. no idea what breaks it) can sink the overall below the facet mean. Emit a receipt grounded
+in `file:line`:
 
 ```
 <symbol> (file:line)
-  you rated N/5 · measured M/5
+  you rated N/5 · measured M/5 overall
+  facets: mechanism 4/5 · failure-modes 1/5 · blast-radius 3/5 · rationale n/a
   ✓ understood: <the real things the answer got right>
   → gap: <the specific thing missed — an invariant, a failure mode, a caller it affects>
   next: <the one thing to go read>
 ```
+
+The per-facet breakdown is what makes the score comprehensive AND actionable: it points at the
+exact dimension to go shore up, and (after `dk vault`) colors that gap onto the call graph.
 
 Hard rules (these are exactly the failure modes an adversarial review flagged):
 

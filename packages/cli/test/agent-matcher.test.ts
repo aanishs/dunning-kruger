@@ -22,6 +22,26 @@ describe("agent-matcher (key-free; shells to the user's own claude/codex)", () =
     expect(p).toContain('"score"');
   });
 
+  it("parses the per-facet dimensions and drops null/missing facets", () => {
+    const r = parseVerdict(
+      '{"score": 3, "dimensions": {"mechanism": 5, "failureModes": 1, "blastRadius": null, "rationale": 9}}',
+    );
+    expect(r.score).toBe(3);
+    expect(r.dimensions).toEqual({ mechanism: 5, failureModes: 1, rationale: 5 }); // null dropped, 9 clamped to 5
+  });
+
+  it("rolls the overall up from the facets when no explicit overall is given", () => {
+    // mechanism 5, failureModes 1, rationale 2 -> avg 2.67 -> 3
+    const r = parseVerdict('{"dimensions": {"mechanism": 5, "failureModes": 1, "rationale": 2}}');
+    expect(r.score).toBe(3);
+  });
+
+  it("stays valid when there are no dimensions (the keyword-style verdict)", () => {
+    const r = parseVerdict('{"score": 4}');
+    expect(r.score).toBe(4);
+    expect(r.dimensions).toBeUndefined();
+  });
+
   it("a correct semantic judge PASSES the contract the keyword matcher fails", async () => {
     // Simulate the session judge: it would read the code; here we encode the intended verdict
     // by recognising each golden answer inside the prompt. Stuffing/injection/empty score low,

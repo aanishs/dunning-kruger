@@ -218,6 +218,17 @@ describe("obsidian vault export", () => {
     expect(note.content).toContain("you felt 5/5, you showed 0/5");
   });
 
+  it("breaks the score into per-facet dimensions when present", () => {
+    const clamp = g.nodes.find((n) => n.name === "clamp")!;
+    const scored = buildVault(g, {
+      scores: { [clamp.id]: { score: 2, self: 4, dimensions: { mechanism: 4, failureModes: 0 } } },
+    });
+    const note = noteFor("clamp", scored)!;
+    expect(note.content).toContain("mechanism: 4/5");
+    expect(note.content).toContain("failure modes: 0/5");
+    expect(note.content).toContain("you showed 2/5 overall");
+  });
+
   it("the graph config maps comprehension tags to colors", () => {
     const cfg = JSON.parse(files.find((f) => f.path === ".obsidian/graph.json")!.content);
     const queries = cfg.colorGroups.map((c: { query: string }) => c.query);
