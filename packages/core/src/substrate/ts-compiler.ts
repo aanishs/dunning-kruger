@@ -6,9 +6,12 @@
 // subprocess. tree-sitter / Joern stay opt-in for non-TS languages later.
 //
 // Pipeline:
-//   tsconfig (or file glob) -> ts.Program -> TypeChecker
-//   pass 1: collect function-like declarations as SymbolNodes
+//   tsconfig (or file glob) -> one or more ts.Programs -> TypeCheckers
+//   pass 1: collect function-like declarations as SymbolNodes (keyed by repo-relative id)
 //   pass 2: walk each body, resolve CallExpressions to declarations, add call edges
+// A references-only monorepo root yields one program per referenced project (each keeping its
+// own paths/baseUrl, so cross-package path-alias edges resolve), plus a glob program for any
+// files no project owns; symbols dedupe across programs by id. See resolveProgramInputs.
 //
 // Known scope (deliberate, not bugs — interview TARGETS, not a complete call graph):
 //   - Top-level functions, methods, and arrow/function consts are indexed. A function
@@ -16,9 +19,12 @@
 //     count toward the parent). We pick the most-connected top-level units to interview on,
 //     so this is fine; it is not a faithful per-closure graph.
 //   - Constructors, class-property arrow methods, and object-literal methods may be missed.
-//   - Cross-project-reference resolution and re-export chains are best-effort.
-// If/when targeting changes to need closure-level fidelity, revisit asFunctionLike + the
-// pass-1 collector together.
+//   - Higher-order edges are invisible: a function passed as a VALUE (`xs.map(helper)`,
+//     `useMutation(fn)`) is not counted as a call edge — only direct invocations are.
+//   - One level of project references is followed (a referenced project that is itself
+//     references-only is not recursed); re-export/barrel chains are best-effort.
+// If/when targeting changes to need closure-level or higher-order fidelity, revisit
+// asFunctionLike + the pass-1 collector / pass-2 resolver together.
 
 import * as ts from "typescript";
 import * as path from "path";
@@ -28,36 +34,47 @@ import { SymbolNode, SymbolGraph, SymbolKind } from "../types";
 export function indexRepo(repoRoot: string): SymbolGraph {
   const root = path.resolve(repoRoot);
   const notes: string[] = [];
-  const { fileNames, options } = resolveProgramInputs(root, notes);
-  const program = ts.createProgram(fileNames, options);
-  const checker = program.getTypeChecker();
+  // One or more programs: normally one, but a references-only monorepo root yields one program
+  // per referenced project so each resolves imports with its OWN paths/baseUrl (cross-package
+  // alias edges otherwise vanish). Symbols are keyed by repo-relative id, so a file pulled into
+  // two programs dedupes cleanly.
+  const inputs = resolveProgramInputs(root, notes);
+  const programs = inputs.map((i) => {
+    const program = ts.createProgram(i.fileNames, i.options);
+    return { program, checker: program.getTypeChecker(), declToId: new Map<ts.Node, string>() };
+  });
 
   const nodes = new Map<string, SymbolNode>();
-  // Map the AST node that `getSymbolAtLocation` will resolve a call to -> our symbol id.
-  const declToId = new Map<ts.Node, string>();
 
-  // ---- Pass 1: collect function-like declarations ----
-  for (const sf of program.getSourceFiles()) {
-    if (sf.isDeclarationFile) continue;
-    if (!isUnder(sf.fileName, root)) continue; // separator-aware: /repo/app-shared is NOT under /repo/app
-    if (sf.fileName.includes("node_modules")) continue;
-    const rel = path.relative(root, sf.fileName);
-    collect(sf, sf, rel, nodes, declToId, collectExportedNames(sf));
+  // ---- Pass 1: collect function-like declarations (all programs, before any edges) ----
+  // Running every program's pass 1 first means a node re-collected from a second program is
+  // reset while its callees are still empty — so no accumulated edge is ever clobbered.
+  for (const { program, declToId } of programs) {
+    for (const sf of program.getSourceFiles()) {
+      if (sf.isDeclarationFile) continue;
+      if (!isUnder(sf.fileName, root)) continue; // separator-aware: /repo/app-shared is NOT under /repo/app
+      if (sf.fileName.includes("node_modules")) continue;
+      const rel = path.relative(root, sf.fileName);
+      collect(sf, sf, rel, nodes, declToId, collectExportedNames(sf));
+    }
   }
 
-  // ---- Pass 2: derive call edges ----
-  for (const [declNode, id] of declToId) {
-    const sym = nodes.get(id)!;
-    const body = bodyOf(declNode);
-    if (!body) continue;
-    walk(body, (n) => {
-      if (ts.isCallExpression(n)) {
-        const targetId = resolveCallee(n, checker, declToId);
-        if (targetId && targetId !== id && !sym.callees.includes(targetId)) {
-          sym.callees.push(targetId);
+  // ---- Pass 2: derive call edges (each program with its own checker; callees merged + deduped) ----
+  for (const { checker, declToId } of programs) {
+    for (const [declNode, id] of declToId) {
+      const sym = nodes.get(id);
+      if (!sym) continue;
+      const body = bodyOf(declNode);
+      if (!body) continue;
+      walk(body, (n) => {
+        if (ts.isCallExpression(n)) {
+          const targetId = resolveCallee(n, checker, declToId);
+          if (targetId && targetId !== id && !sym.callees.includes(targetId)) {
+            sym.callees.push(targetId);
+          }
         }
-      }
-    });
+      });
+    }
   }
 
   // ---- in-degree (centrality) ----
@@ -278,38 +295,73 @@ function isUnder(p: string, root: string): boolean {
   return p === root || p.startsWith(root + path.sep);
 }
 
-function resolveProgramInputs(
-  root: string,
-  notes: string[],
-): { fileNames: string[]; options: ts.CompilerOptions } {
-  const tsconfigPath = ts.findConfigFile(root, ts.sys.fileExists, "tsconfig.json");
-  if (tsconfigPath && isUnder(path.dirname(tsconfigPath), root)) {
-    const cfg = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
-    const parsed = ts.parseJsonConfigFileContent(cfg.config, ts.sys, path.dirname(tsconfigPath));
-    if (parsed.fileNames.length > 0) {
-      return { fileNames: parsed.fileNames, options: { ...parsed.options, noEmit: true } };
-    }
-    notes.push("tsconfig found but matched no files; falling back to file glob.");
-  } else {
-    notes.push("no tsconfig found; used file glob (symbol resolution may be less precise).");
-  }
-  const fileNames: string[] = [];
+interface ProgramInput {
+  fileNames: string[];
+  options: ts.CompilerOptions;
+}
+
+// Options for the glob fallback program: no tsconfig paths/baseUrl, so it resolves relative
+// imports but not path aliases. Used for whole-repo coverage and for files no project owns.
+const FALLBACK_OPTIONS: ts.CompilerOptions = {
+  target: ts.ScriptTarget.ES2022,
+  module: ts.ModuleKind.NodeNext,
+  moduleResolution: ts.ModuleResolutionKind.NodeNext,
+  allowJs: false,
+  noEmit: true,
+};
+
+function globFiles(root: string): string[] {
+  const out: string[] = [];
   (function glob(dir: string) {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       if (e.name === "node_modules" || e.name.startsWith(".") || e.name === "dist") continue;
       const full = path.join(dir, e.name);
       if (e.isDirectory()) glob(full);
-      else if (/\.tsx?$/.test(e.name) && !e.name.endsWith(".d.ts")) fileNames.push(full);
+      else if (/\.tsx?$/.test(e.name) && !e.name.endsWith(".d.ts")) out.push(full);
     }
   })(root);
-  return {
-    fileNames,
-    options: {
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.NodeNext,
-      moduleResolution: ts.ModuleResolutionKind.NodeNext,
-      allowJs: false,
-      noEmit: true,
-    },
-  };
+  return out;
+}
+
+function resolveProgramInputs(root: string, notes: string[]): ProgramInput[] {
+  const tsconfigPath = ts.findConfigFile(root, ts.sys.fileExists, "tsconfig.json");
+  if (tsconfigPath && isUnder(path.dirname(tsconfigPath), root)) {
+    const cfg = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+    const parsed = ts.parseJsonConfigFileContent(cfg.config, ts.sys, path.dirname(tsconfigPath));
+    if (parsed.fileNames.length > 0) {
+      return [{ fileNames: parsed.fileNames, options: { ...parsed.options, noEmit: true } }];
+    }
+    // References-only root (the common monorepo shape: Nx / Turborepo / pnpm / project-refs).
+    // Build a program per referenced project so cross-package path-alias / workspace imports
+    // resolve against each project's own paths/baseUrl. (One level — a referenced project that
+    // is itself references-only is not recursed in v1.)
+    const refInputs: ProgramInput[] = [];
+    const covered = new Set<string>();
+    for (const ref of parsed.projectReferences ?? []) {
+      const refTsconfig = ts.resolveProjectReferencePath(ref); // dir -> dir/tsconfig.json
+      if (!refTsconfig || !ts.sys.fileExists(refTsconfig)) continue;
+      const rc = ts.readConfigFile(refTsconfig, ts.sys.readFile);
+      const rp = ts.parseJsonConfigFileContent(rc.config, ts.sys, path.dirname(refTsconfig));
+      if (rp.fileNames.length > 0) {
+        refInputs.push({ fileNames: rp.fileNames, options: { ...rp.options, noEmit: true } });
+        for (const f of rp.fileNames) covered.add(path.resolve(f));
+      }
+    }
+    if (refInputs.length > 0) {
+      // Completeness: a root may reference only SOME packages. Glob anything no project owns so
+      // the interview still covers the whole repo (relative edges resolve; aliases there won't).
+      const leftover = globFiles(root).filter((f) => !covered.has(path.resolve(f)));
+      notes.push(
+        `resolved ${refInputs.length} project reference${refInputs.length > 1 ? "s" : ""} from the root tsconfig` +
+          (leftover.length ? `, plus ${leftover.length} unreferenced file(s) via glob.` : "."),
+      );
+      return leftover.length
+        ? [...refInputs, { fileNames: leftover, options: FALLBACK_OPTIONS }]
+        : refInputs;
+    }
+    notes.push("tsconfig found but matched no files; falling back to file glob.");
+  } else {
+    notes.push("no tsconfig found; used file glob (symbol resolution may be less precise).");
+  }
+  return [{ fileNames: globFiles(root), options: FALLBACK_OPTIONS }];
 }

@@ -10,6 +10,7 @@ import { renderCurveHtml } from "../src/render/curve-html";
 import type { Question } from "../src/types";
 
 const FIX = path.join(__dirname, "fixture");
+const FIX_MONO = path.join(__dirname, "fixture-mono");
 
 describe("substrate (TS-compiler)", () => {
   const g = indexRepo(FIX);
@@ -35,6 +36,28 @@ describe("substrate (TS-compiler)", () => {
 
   it("ranks the most central/complex symbol first", () => {
     expect(pickTargets(g, 5)[0].name).toBe("priceOrder");
+  });
+});
+
+describe("substrate — monorepo project references (cross-package alias edges)", () => {
+  const g = indexRepo(FIX_MONO);
+  const fromA = g.nodes.find((n) => n.name === "fromA");
+  const fromB = g.nodes.find((n) => n.name === "fromB");
+
+  it("indexes both referenced packages from a references-only root", () => {
+    expect(fromA).toBeTruthy();
+    expect(fromB).toBeTruthy();
+  });
+
+  it("resolves a cross-package import that goes through a tsconfig path alias", () => {
+    // The glob-only fallback (no paths/baseUrl) would miss this; following the project
+    // references resolves `@b/*` -> pkg-b, so the fromA -> fromB edge survives.
+    expect(fromA!.callees).toContain(fromB!.id);
+    expect(g.inDegree[fromB!.id]).toBe(1);
+  });
+
+  it("records that it followed project references", () => {
+    expect(g.notes.join(" ")).toMatch(/project reference/);
   });
 });
 
