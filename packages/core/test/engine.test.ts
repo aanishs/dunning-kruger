@@ -351,6 +351,30 @@ describe("domain naming (renameDomains)", () => {
   });
 });
 
+describe("substrate without body facts (graphify path)", () => {
+  it("keyword matcher reports ungradable (not 'Solid') when there are no concepts", () => {
+    const q = { targetId: "x", type: "explain", prompt: "?", expectedConcepts: [] } as unknown as Question;
+    const r = keywordMatcher.grade("anything", q) as { learnNext: string; reason: string };
+    expect(r.learnNext).not.toMatch(/solid/i);
+    expect(r.learnNext).toMatch(/--smart|skill/i);
+    expect(r.reason).toMatch(/not gradable|no params|substrate/i);
+  });
+
+  it("buildLesson says 'not extracted' for params/branches when bodyFacts is false", () => {
+    const node = { id: "a#f:1", name: "f", kind: "function", file: "a.py", line: 1, endLine: 1, exported: true, params: [], branchCount: 0, callees: [], loc: 1 } as unknown as Parameters<typeof buildLesson>[0];
+    const graph = { repo: "/r", nodes: [node], inDegree: {}, notes: [], bodyFacts: false } as unknown as Parameters<typeof buildLesson>[1];
+    const text = buildLesson(node, graph, "def f(): ...").breakdown.join(" | ");
+    expect(text).toMatch(/not extracted by this substrate/i);
+    expect(text).not.toContain("No branches — it runs straight through");
+  });
+
+  it("buildLesson keeps the confident wording on the TS substrate (bodyFacts undefined)", () => {
+    const node = { id: "a#f:1", name: "f", kind: "function", file: "a.ts", line: 1, endLine: 3, exported: false, params: [], branchCount: 0, callees: [], loc: 3 } as unknown as Parameters<typeof buildLesson>[0];
+    const graph = { repo: "/r", nodes: [node], inDegree: {}, notes: [] } as unknown as Parameters<typeof buildLesson>[1];
+    expect(buildLesson(node, graph, "function f(){}").breakdown.join(" | ")).toContain("No branches");
+  });
+});
+
 describe("markdown report", () => {
   const base = {
     title: "demo",

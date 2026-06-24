@@ -15,6 +15,7 @@ import * as readline from "node:readline";
 import { execFileSync } from "child_process";
 import {
   indexRepo,
+  indexRepoViaGraphify,
   pickTargets,
   generateQuestions,
   keywordMatcher,
@@ -50,11 +51,66 @@ function parseLevel(argv: string[]): Level {
   return "mid";
 }
 
+// Which code-structure substrate feeds the interview. `ts` = the TypeScript compiler (carries
+// params/branches/spans — the full-fidelity path). `graphify` = the polyglot tree-sitter graph
+// (36 languages, but no body facts, so null-param/control-flow questions degrade to explain +
+// blast-radius). `auto` (default) uses ts, and falls back to graphify when ts finds no symbols
+// (e.g. a Python/Go repo) and graphify is installed.
+type Substrate = "ts" | "graphify" | "auto";
+
+function parseSubstrate(argv: string[]): Substrate {
+  const kv = argv.find((a) => a.startsWith("--substrate="));
+  if (kv) {
+    const v = kv.slice("--substrate=".length);
+    if (v === "ts" || v === "graphify" || v === "auto") return v;
+    console.error(`unknown --substrate=${v} (expected ts|graphify|auto) — using auto.`);
+  }
+  if (argv.includes("--graphify")) return "graphify";
+  return "auto";
+}
+
+function graphifyNotice(g: SymbolGraph): void {
+  console.log(
+    `(graphify substrate: ${g.nodes.length} symbols across all languages. Body-fact questions ` +
+      `(null-param, control-flow) are limited here; "explain" and blast-radius questions work fully.)`,
+  );
+}
+
+// Build the SymbolGraph from the chosen substrate. The interview, targets, and teach all go
+// through this, so they're substrate-agnostic.
+function buildGraph(repo: string, substrate: Substrate): SymbolGraph {
+  if (substrate === "graphify") {
+    try {
+      const g = indexRepoViaGraphify(repo);
+      graphifyNotice(g);
+      return g;
+    } catch (e) {
+      console.log((e as Error).message); // friendly "install graphifyy / set GRAPHIFY_BIN" message
+      return indexRepo(repo); // degrade to the TS substrate (empty on a non-TS repo)
+    }
+  }
+  const ts = indexRepo(repo);
+  if (substrate === "ts" || ts.nodes.length > 0) return ts;
+  // auto + ts found nothing (non-TS repo): try graphify if it's installed.
+  try {
+    const gg = indexRepoViaGraphify(repo);
+    if (gg.nodes.length > 0) {
+      console.log("(no TypeScript symbols found — falling back to the graphify substrate.)");
+      graphifyNotice(gg);
+      return gg;
+    }
+  } catch (e) {
+    if (process.env.DK_DEBUG) console.error(`graphify substrate unavailable: ${(e as Error).message}`);
+  }
+  return ts; // empty — the caller prints "no symbols found"
+}
+
 async function main(argv: string[]): Promise<number> {
   // `--smart` opts the standalone CLI into agent grading (shells to the user's own
   // claude -p / codex — their sub, no API key). Strip flags before positional parsing.
   const smart = argv.includes("--smart");
   const level = parseLevel(argv);
+  const substrate = parseSubstrate(argv);
   const [cmd, repoArg, nArg] = argv.filter((a) => !a.startsWith("--"));
   const repo = repoArg ?? process.cwd();
   const n = nArg ? parseInt(nArg, 10) : 5;
@@ -72,17 +128,19 @@ async function main(argv: string[]): Promise<number> {
       console.log("  --smart          grade with your own claude -p / codex (your sub, no API key)");
       console.log("  --level=<high|mid|low>   question altitude: high = design/why (default mid = blast-radius,");
       console.log("                           low = line-level mechanism). Aliases: --high, --low");
+      console.log("  --substrate=<ts|graphify|auto>  interview engine (default auto: TS, else graphify for");
+      console.log("                           non-TS repos — needs `pip install graphifyy`). Alias: --graphify");
       return 0;
     case "index":
-      return cmdIndex(repo);
+      return cmdIndex(repo, substrate);
     case "targets":
-      return cmdTargets(repo, n);
+      return cmdTargets(repo, n, substrate);
     case "questions":
-      return cmdQuestions(repo, n, level);
+      return cmdQuestions(repo, n, level, substrate);
     case "interview":
-      return cmdInterview(repo, n, smart, level);
+      return cmdInterview(repo, n, smart, level, substrate);
     case "teach":
-      return cmdTeach(repo, nArg, level);
+      return cmdTeach(repo, nArg, level, substrate);
     case "curve":
     case "report":
       return cmdReport(repo, nArg);
@@ -97,8 +155,8 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
-function cmdIndex(repo: string): number {
-  const g = indexRepo(repo);
+function cmdIndex(repo: string, substrate: Substrate = "auto"): number {
+  const g = buildGraph(repo, substrate);
   const edges = g.nodes.reduce((s, x) => s + x.callees.length, 0);
   console.log(`repo:    ${g.repo}`);
   console.log(`symbols: ${g.nodes.length}`);
@@ -107,8 +165,8 @@ function cmdIndex(repo: string): number {
   return 0;
 }
 
-function cmdTargets(repo: string, n: number): number {
-  const g = indexRepo(repo);
+function cmdTargets(repo: string, n: number, substrate: Substrate = "auto"): number {
+  const g = buildGraph(repo, substrate);
   const targets = pickTargets(g, n);
   if (!targets.length) return say("No rankable symbols found (repo too small).");
   console.log(`Top ${targets.length} interview targets in ${g.repo}:\n`);
@@ -122,8 +180,8 @@ function cmdTargets(repo: string, n: number): number {
   return 0;
 }
 
-function cmdQuestions(repo: string, n: number, level: Level = "mid"): number {
-  const g = indexRepo(repo);
+function cmdQuestions(repo: string, n: number, level: Level = "mid", substrate: Substrate = "auto"): number {
+  const g = buildGraph(repo, substrate);
   const targets = pickTargets(g, n);
   if (!targets.length) return say("No rankable symbols found.");
   targets.forEach((t, i) => {
@@ -147,8 +205,9 @@ async function cmdInterview(
   n: number,
   smart = false,
   level: Level = "mid",
+  substrate: Substrate = "auto",
 ): Promise<number> {
-  const g = indexRepo(repo);
+  const g = buildGraph(repo, substrate);
   const targets = pickTargets(g, n);
   if (!targets.length) return say("No rankable symbols found — repo too small to interview on.");
 
@@ -168,6 +227,13 @@ async function cmdInterview(
     console.log(
       "(--level=high asks design/why questions; the keyword fallback can't grade those well —\n" +
         " add --smart, or run the /dunning-kruger skill so your session model judges them.)",
+    );
+  }
+  if (g.bodyFacts === false && matcher === keywordMatcher) {
+    // graphify gives no params/branches, so the offline rubric is thin/empty — steer to a real grade.
+    console.log(
+      "(this substrate carries no body facts, so the offline grader is unreliable here —\n" +
+        " add --smart, or run the /dunning-kruger skill, for a real grade.)",
     );
   }
 
@@ -237,8 +303,8 @@ function updateOverlayScore(repo: string, target: Target, grade: GradeResult): v
   }
 }
 
-async function cmdTeach(repo: string, nameArg?: string, level: Level = "mid"): Promise<number> {
-  const g = indexRepo(repo);
+async function cmdTeach(repo: string, nameArg?: string, level: Level = "mid", substrate: Substrate = "auto"): Promise<number> {
+  const g = buildGraph(repo, substrate);
   let target: Target | undefined;
   // A non-numeric arg is a symbol name. Use a strict digits test, not isNaN(parseInt) —
   // "f1"/"v2" parse to a number but are names, not indices.
@@ -415,10 +481,28 @@ async function teachLoop(
 function readSource(repo: string, node: SymbolNode): string {
   try {
     const lines = fs.readFileSync(path.join(repo, node.file), "utf8").split("\n");
-    return lines.slice(node.line - 1, node.endLine).join("\n");
+    const start = node.line - 1;
+    // ts-compiler gives an exact span (endLine > line) — slice it directly.
+    if (node.endLine > node.line) return lines.slice(start, node.endLine).join("\n");
+    // graphify gives only the declaration line. Read a best-effort window that stops at the next
+    // sibling/top-level definition (so we don't show the NEXT function as "what it does"), capped.
+    const declIndent = indentOf(lines[start] ?? "");
+    const out: string[] = [lines[start] ?? ""];
+    for (let i = start + 1; i < lines.length && out.length < 40; i++) {
+      const ln = lines[i];
+      if (ln.trim() && indentOf(ln) <= declIndent && NEW_DEF.test(ln)) break; // next sibling decl
+      out.push(ln);
+    }
+    return out.join("\n").replace(/\n+$/, "");
   } catch {
     return "(source unavailable)";
   }
+}
+
+const NEW_DEF = /^\s*(?:async\s+)?(?:def |class |function |export |const |let |var |func |public |private |protected |@)/;
+function indentOf(line: string): number {
+  const m = /^(\s*)/.exec(line);
+  return m ? m[1].length : 0;
 }
 
 function printResults(answered: AnsweredTarget[], p: ReturnType<typeof placeOnCurve>): void {

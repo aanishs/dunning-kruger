@@ -176,7 +176,7 @@ export function indexRepoViaGraphify(repoRoot: string, opts: GraphifyOptions = {
       `approximated — null-param and control-flow questions are weaker than the TS-compiler substrate.`,
   );
 
-  return { repo: root, nodes: [...nodes.values()], inDegree, notes };
+  return { repo: root, nodes: [...nodes.values()], inDegree, notes, bodyFacts: false };
 }
 
 /** graphify labels a function `main()` / `Cls.method()`; ts-compiler keys on the bare name. */

@@ -11,6 +11,20 @@ import { Matcher, Question, GradeResult } from "../types";
 export const keywordMatcher: Matcher = {
   name: "keyword",
   grade(answer: string, question: Question): GradeResult {
+    // No code-derived rubric (e.g. a graphify leaf symbol with no callees/params/branches): the
+    // offline matcher genuinely can't grade this. Say so honestly instead of scoring 0 with a
+    // contradictory "Solid" message — and point at the path that CAN grade it.
+    if (question.expectedConcepts.length === 0) {
+      return {
+        score: 0,
+        covered: [],
+        missed: [],
+        learnNext:
+          "The offline grader has no code facts for this symbol — run with `--smart`, or the /dunning-kruger skill, for a real grade.",
+        reason: "Not gradable by the offline keyword matcher: this substrate exposed no params/branches/callees to check against.",
+      };
+    }
+
     const hay = ` ${answer.toLowerCase()} `;
     const covered: string[] = [];
     const missed: string[] = [];

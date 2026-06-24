@@ -37,6 +37,12 @@ export interface SymbolGraph {
   inDegree: Record<string, number>;
   /** Non-fatal notes (e.g. "no tsconfig found, used file glob"). */
   notes: string[];
+  /**
+   * Whether the substrate carries per-symbol BODY facts (params, branchCount, return type, exact
+   * span). True/undefined for the TS-compiler substrate; false for graphify (call graph only) —
+   * so `branchCount: 0` means "unknown", not "zero". Consumers phrase those facts honestly.
+   */
+  bodyFacts?: boolean;
 }
 
 export interface Target extends SymbolNode {

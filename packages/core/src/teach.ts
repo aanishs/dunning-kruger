@@ -12,8 +12,19 @@ export function buildLesson(target: SymbolNode, graph: SymbolGraph, source: stri
   const byId = new Map(graph.nodes.map((n) => [n.id, n] as const));
   const calleeNames = target.callees.map((id) => byId.get(id)?.name ?? id);
 
+  // graphify carries no body facts, so params/branches are UNKNOWN (not zero). Phrase them
+  // honestly rather than claiming "none"/"No branches" while the source above shows otherwise.
+  const known = graph.bodyFacts !== false;
+
   const breakdown: string[] = [];
-  breakdown.push(`Parameters: ${target.params.length ? target.params.join(", ") : "none"}`);
+  breakdown.push(
+    target.params.length
+      ? `Parameters: ${target.params.join(", ")}`
+      : known
+        ? "Parameters: none"
+        : "Parameters: read them off the source above (not extracted by this substrate)",
+  );
+  // Callees are reliable on both substrates.
   breakdown.push(
     calleeNames.length
       ? `Calls into: ${calleeNames.join(", ")}`
@@ -22,7 +33,9 @@ export function buildLesson(target: SymbolNode, graph: SymbolGraph, source: stri
   breakdown.push(
     target.branchCount > 0
       ? `Branches / edge cases to account for: ${target.branchCount}`
-      : "No branches — it runs straight through, no edge cases",
+      : known
+        ? "No branches — it runs straight through, no edge cases"
+        : "Branches: count them in the source above (not extracted by this substrate)",
   );
   if (target.returnType) breakdown.push(`Returns: ${target.returnType}`);
 
