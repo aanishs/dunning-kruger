@@ -128,6 +128,14 @@ function applyToNote(raw: string, op: Op): string {
   r = r.replace(new RegExp(`(#)${escapeRe(op.oldTag)}(?![A-Za-z0-9_/-])`, "g"), (_m, a) => `${a}${op.newTag}`);
   // _COMMUNITY_ index heading `# Community 6` (end-anchored)
   r = r.replace(new RegExp(`(^#[ \\t]+)${escapeRe(op.oldDisplay)}[ \\t]*$`, "m"), (_m, a) => `${a}${op.newDisplay}`);
+  // inbound wikilinks to this community's index note: `[[_COMMUNITY_Community 6]]` and
+  // `[[_COMMUNITY_Community 6|alias]]`. graphify cross-links communities this way, so renaming the
+  // FILE without these orphans the links into grey placeholder nodes. The `]]`/`|` boundary keeps
+  // "Community 1" from matching inside "Community 10". We point them at the new FILE base name.
+  r = r.replace(
+    new RegExp(`(\\[\\[_COMMUNITY_)${escapeRe(op.oldDisplay)}((?:\\|[^\\]]*)?\\]\\])`, "g"),
+    (_m, a, b) => `${a}${op.newFile}${b}`,
+  );
   return r;
 }
 

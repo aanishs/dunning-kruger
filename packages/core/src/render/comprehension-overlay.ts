@@ -178,7 +178,7 @@ function stripDkTags(front: string): string {
  */
 function mergeColorGroups(vaultDir: string, notes: string[]): number {
   const gjPath = path.join(vaultDir, ".obsidian", "graph.json");
-  let config: { colorGroups?: { query: string; color: { a: number; rgb: number } }[] } = {};
+  let config: { colorGroups?: { query: string; color: { a: number; rgb: number } }[]; search?: string } = {};
   if (fs.existsSync(gjPath)) {
     try {
       config = JSON.parse(fs.readFileSync(gjPath, "utf8"));
@@ -195,6 +195,12 @@ function mergeColorGroups(vaultDir: string, notes: string[]): number {
   const dkQueries = new Set(dkGroups.map((g) => g.query));
   const kept = (config.colorGroups ?? []).filter((g) => !dkQueries.has(g.query));
   config.colorGroups = [...dkGroups, ...kept]; // dk first → wins over community color on scored nodes
+
+  // Default the graph view to the colored CALL graph: hide graphify's navigation scaffolding (the
+  // `_COMMUNITY_` index hubs + GRAPH_REPORT), which otherwise dominates the global graph and buries
+  // the function nodes. The user can clear this in Graph view → search to see the full structure.
+  if (!config.search) config.search = "-_COMMUNITY_ -GRAPH_REPORT";
+
   fs.writeFileSync(gjPath, JSON.stringify(config, null, 2), "utf8");
   return dkGroups.length;
 }

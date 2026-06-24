@@ -239,6 +239,21 @@ describe("comprehension overlay (onto a graphify vault)", () => {
     expect(queries).toContain("tag:#community/Community_1"); // community group kept after
   });
 
+  it("sets a default graph filter to hide the _COMMUNITY_ scaffolding", () => {
+    const dir = makeVault();
+    overlayComprehension(dir, {});
+    const cfg = JSON.parse(fs.readFileSync(path.join(dir, ".obsidian", "graph.json"), "utf8"));
+    expect(cfg.search).toContain("_COMMUNITY_");
+  });
+
+  it("does not clobber an existing user graph search filter", () => {
+    const dir = makeVault();
+    const gj = path.join(dir, ".obsidian", "graph.json");
+    fs.writeFileSync(gj, JSON.stringify({ colorGroups: [], search: "tag:#mine" }));
+    overlayComprehension(dir, {});
+    expect(JSON.parse(fs.readFileSync(gj, "utf8")).search).toBe("tag:#mine");
+  });
+
   it("is idempotent — re-running re-derives one dk tag, not a stack", () => {
     const dir = makeVault();
     const scores = { [joinKey("src/x.ts", "foo")]: { score: 5 } };
@@ -331,6 +346,21 @@ describe("domain naming (renameDomains)", () => {
     const res = renameDomains(dir, { "Community 99": "Ghost" });
     expect(res.unmatched).toEqual(["Community 99"]);
     expect(res.renamed).toBe(0);
+  });
+
+  it("rewrites inbound [[_COMMUNITY_...]] wikilinks so renamed communities don't orphan", () => {
+    const dir = makeVault();
+    fs.writeFileSync(
+      path.join(dir, "x().md"),
+      `---\nsource_file: "src/x.ts"\ncommunity: "Community 1"\ntags:\n  - community/Community_1\n---\n\n# x()\n\n- [[_COMMUNITY_Community 1]]\n- [[_COMMUNITY_Community 1|the auth one]]\n- [[_COMMUNITY_Community 10|ten]]\n`,
+    );
+    renameDomains(dir, { "Community 1": "Auth" });
+    const note = fs.readFileSync(path.join(dir, "x().md"), "utf8");
+    expect(note).toContain("[[_COMMUNITY_Auth]]"); // plain wikilink retargeted to the renamed file
+    expect(note).toContain("[[_COMMUNITY_Auth|the auth one]]"); // aliased link retargeted, alias kept
+    expect(note).not.toContain("[[_COMMUNITY_Community 1]]");
+    expect(note).not.toContain("[[_COMMUNITY_Community 1|");
+    expect(note).toContain("[[_COMMUNITY_Community 10|ten]]"); // boundary: Community 10 untouched
   });
 
   it("rejects an invalid mapping before writing anything (dupes / non-string)", () => {
