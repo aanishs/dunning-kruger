@@ -31,3 +31,5 @@ export { renderReportMarkdown } from "./render/curve-md";
 export type { ReportData, ReportPoint } from "./render/curve-md";
 export { overlayComprehension, joinKey } from "./render/comprehension-overlay";
 export type { SymbolScore, OverlayOptions, OverlayResult } from "./render/comprehension-overlay";
+export { renameDomains } from "./render/domains";
+export type { RenameResult } from "./render/domains";

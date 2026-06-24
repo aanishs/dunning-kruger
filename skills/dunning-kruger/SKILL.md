@@ -93,6 +93,8 @@ receipts either way — only the question set differs (whole repo vs. just the c
    `[[wikilinks]]` = call edges, Leiden communities = domains) and **recolors each node by the
    comprehension scores you just produced** — your black boxes, lit up on the real structure of the
    code. Needs graphify once (`pip install graphifyy`); skip if they're not Obsidian users.
+8. **Name the domains** — the vault's communities come out numbered ("Community 6"). After the
+   build, name them yourself and apply it with `dk name-domains`. See `sections/DOMAINS.md`.
 
 ## Question altitude — interview, don't quiz
 
@@ -135,6 +137,7 @@ and different output (a ship-readiness checklist, not a curve). When the user's 
 | rendering the curve + naming the calibration zone (honest labels, no meme) | `sections/CURVE.md` |
 | the teaching loop (explain → explain-back → re-score, the protégé effect) | `sections/TEACHING.md` |
 | reviewing a change/PR for ship-readiness (blast radius, ownership) | `sections/OWNERSHIP.md` |
+| naming the vault's numbered communities into real domains | `sections/DOMAINS.md` |
 
 ---
 _The "interview you about your own code" idea is part of the comprehension-debt response to

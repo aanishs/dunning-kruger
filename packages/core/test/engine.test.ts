@@ -10,6 +10,7 @@ import { placeOnCurve } from "../src/curve";
 import { buildLesson } from "../src/teach";
 import { renderReportMarkdown } from "../src/render/curve-md";
 import { overlayComprehension, joinKey } from "../src/render/comprehension-overlay";
+import { renameDomains } from "../src/render/domains";
 import type { Question } from "../src/types";
 
 const FIX = path.join(__dirname, "fixture");
@@ -253,6 +254,100 @@ describe("comprehension overlay (onto a graphify vault)", () => {
     const dir = makeVault();
     const res = overlayComprehension(dir, { [joinKey("src/gone.ts", "ghost")]: { score: 3 } });
     expect(res.unmatched).toEqual([joinKey("src/gone.ts", "ghost")]);
+  });
+});
+
+describe("domain naming (renameDomains)", () => {
+  // A stand-in graphify vault: a member note (frontmatter community field + tag + inline tag), a
+  // _COMMUNITY_ index note, a graph.canvas with group labels, and .obsidian/graph.json colorGroups.
+  function makeVault(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dk-domains-"));
+    fs.writeFileSync(
+      path.join(dir, "foo().md"),
+      `---\nsource_file: "src/x.ts"\ntype: "code"\ncommunity: "Community 1"\nlocation: "L10"\ntags:\n  - graphify/code\n  - community/Community_1\n---\n\n# foo()\n\n#graphify/code #community/Community_1\n`,
+    );
+    // a SECOND community whose number is a prefix of the first ("Community 1" vs "Community 10")
+    fs.writeFileSync(
+      path.join(dir, "baz().md"),
+      `---\nsource_file: "src/z.ts"\ncommunity: "Community 10"\ntags:\n  - community/Community_10\n---\n\n# baz()\n\n#community/Community_10\n`,
+    );
+    fs.writeFileSync(
+      path.join(dir, "_COMMUNITY_Community 1.md"),
+      `---\ntype: community\nmembers: 1\n---\n\n# Community 1\n\n## Members\n- [[foo()]]\n`,
+    );
+    fs.writeFileSync(
+      path.join(dir, "graph.canvas"),
+      JSON.stringify({ nodes: [{ type: "group", label: "Community 1" }, { type: "group", label: "Community 10" }] }),
+    );
+    fs.mkdirSync(path.join(dir, ".obsidian"));
+    fs.writeFileSync(
+      path.join(dir, ".obsidian", "graph.json"),
+      JSON.stringify({ colorGroups: [{ query: "tag:#community/Community_1", color: { a: 1, rgb: 1 } }] }),
+    );
+    return dir;
+  }
+
+  it("renames a community across notes, tags, index note, canvas, and graph.json", () => {
+    const dir = makeVault();
+    const res = renameDomains(dir, { "Community 1": "Auth" });
+    expect(res.renamed).toBe(1);
+
+    const note = fs.readFileSync(path.join(dir, "foo().md"), "utf8");
+    expect(note).toContain('community: "Auth"');
+    expect(note).toContain("community/Auth"); // frontmatter tag AND inline tag
+    expect(note).not.toContain("community/Community_1");
+
+    expect(fs.existsSync(path.join(dir, "_COMMUNITY_Auth.md"))).toBe(true);
+    expect(fs.existsSync(path.join(dir, "_COMMUNITY_Community 1.md"))).toBe(false);
+    expect(fs.readFileSync(path.join(dir, "_COMMUNITY_Auth.md"), "utf8")).toContain("# Auth");
+
+    const canvas = JSON.parse(fs.readFileSync(path.join(dir, "graph.canvas"), "utf8"));
+    expect(canvas.nodes.map((n: { label: string }) => n.label)).toContain("Auth");
+
+    const gj = JSON.parse(fs.readFileSync(path.join(dir, ".obsidian", "graph.json"), "utf8"));
+    expect(gj.colorGroups[0].query).toBe("tag:#community/Auth");
+  });
+
+  it("does NOT corrupt Community 10 when renaming Community 1 (prefix-collision guard)", () => {
+    const dir = makeVault();
+    renameDomains(dir, { "Community 1": "Auth" });
+    const baz = fs.readFileSync(path.join(dir, "baz().md"), "utf8");
+    expect(baz).toContain("community/Community_10"); // untouched
+    expect(baz).toContain('community: "Community 10"');
+    const canvas = JSON.parse(fs.readFileSync(path.join(dir, "graph.canvas"), "utf8"));
+    expect(canvas.nodes.map((n: { label: string }) => n.label)).toContain("Community 10");
+  });
+
+  it("slugifies a spaced domain name into a valid tag but keeps the display name", () => {
+    const dir = makeVault();
+    renameDomains(dir, { "Community 1": "Patient Management" });
+    const note = fs.readFileSync(path.join(dir, "foo().md"), "utf8");
+    expect(note).toContain("community/Patient_Management"); // tag-safe
+    expect(note).toContain('community: "Patient Management"'); // human display
+  });
+
+  it("reports mapping keys that match nothing", () => {
+    const dir = makeVault();
+    const res = renameDomains(dir, { "Community 99": "Ghost" });
+    expect(res.unmatched).toEqual(["Community 99"]);
+    expect(res.renamed).toBe(0);
+  });
+
+  it("rejects an invalid mapping before writing anything (dupes / non-string)", () => {
+    const dir = makeVault();
+    expect(() => renameDomains(dir, { "Community 1": "Auth", "Community 10": "Auth" })).toThrow(/same name/i);
+    expect(() => renameDomains(dir, { "Community 1": null })).toThrow(/string/i);
+    expect(() => renameDomains(dir, { "Community 1": 'has"quote' })).toThrow(/quotes/i);
+    // the vault was not mutated by a rejected run
+    expect(fs.readFileSync(path.join(dir, "foo().md"), "utf8")).toContain('community: "Community 1"');
+  });
+
+  it("treats $ in a name as literal, not a regex backreference, and keeps YAML intact", () => {
+    const dir = makeVault();
+    renameDomains(dir, { "Community 1": "A$1B" });
+    const note = fs.readFileSync(path.join(dir, "foo().md"), "utf8");
+    expect(note).toContain('community: "A$1B"'); // $1 stayed literal
+    expect(note).toContain("community/A_1B"); // tag-slugged
   });
 });
 

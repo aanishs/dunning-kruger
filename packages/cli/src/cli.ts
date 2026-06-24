@@ -23,6 +23,7 @@ import {
   renderReportMarkdown,
   overlayComprehension,
   joinKey,
+  renameDomains,
   llmFreeEnv,
   Target,
   Question,
@@ -63,10 +64,11 @@ async function main(argv: string[]): Promise<number> {
     case "help":
     case "-h":
     case "--help":
-      console.log("dk index|targets|questions|interview|teach|report|vault <repo> [n|symbol|out]");
+      console.log("dk index|targets|questions|interview|teach|report|vault|name-domains <repo> [n|symbol|out]");
       console.log("  report <repo> [out.md]   write a markdown calibration report (gap + reading list)");
       console.log("  vault <repo> [dir]       build the graphify Obsidian vault, colored by your");
       console.log("                           comprehension (needs graphify: `pip install graphifyy`)");
+      console.log("  name-domains <vault> <map.json>  apply community names {\"Community 6\":\"Auth\"} to a vault");
       console.log("  --smart          grade with your own claude -p / codex (your sub, no API key)");
       console.log("  --level=<high|mid|low>   question altitude: high = design/why (default mid = blast-radius,");
       console.log("                           low = line-level mechanism). Aliases: --high, --low");
@@ -87,6 +89,8 @@ async function main(argv: string[]): Promise<number> {
     case "vault":
     case "obsidian":
       return cmdVault(repo, nArg);
+    case "name-domains":
+      return cmdNameDomains(repoArg, nArg);
     default:
       console.error(`unknown command: ${cmd}`);
       return 1;
@@ -337,6 +341,40 @@ function buildGraphifyVault(root: string, outDir: string): { ok: true } | { ok: 
       : `graphify failed while building the vault: ${(e as Error).message}`;
     return { ok: false, error: msg };
   }
+}
+
+// Apply a model-produced community-name mapping to a built vault. The SKILL (DOMAINS.md) has the
+// in-session model read the _COMMUNITY_ member lists and write the JSON; this just applies it.
+function cmdNameDomains(arg1?: string, arg2?: string): number {
+  let vaultArg = arg1;
+  let mappingArg = arg2;
+  // `dk name-domains <mapping-file>` → use the default vault when the lone arg is an existing file.
+  if (arg1 && !arg2) {
+    const isFile = (() => { try { return fs.statSync(arg1).isFile(); } catch { return false; } })();
+    if (isFile) { mappingArg = arg1; vaultArg = undefined; }
+  }
+  if (!mappingArg) {
+    return say(`usage: dk name-domains <vault-dir> <mapping.json>   (mapping: {"Community 6":"Auth"})`);
+  }
+  const vault = vaultArg ? path.resolve(vaultArg) : path.join(process.cwd(), ".dunning-kruger", "vault");
+  if (!fs.existsSync(vault)) return say(`no vault at ${vault} — run \`dk vault\` first.`);
+  let mapping: unknown;
+  try {
+    mapping = JSON.parse(fs.readFileSync(mappingArg, "utf8"));
+  } catch (e) {
+    return say(`couldn't read mapping ${mappingArg}: ${(e as Error).message}`);
+  }
+  let res;
+  try {
+    res = renameDomains(vault, mapping as Record<string, unknown>); // validates + throws on a bad mapping
+  } catch (e) {
+    return say((e as Error).message);
+  }
+  console.log(res.notes[res.notes.length - 1]);
+  if (res.unmatched.length) {
+    console.log(`  (${res.unmatched.length} unmatched — already renamed, or no such community: ${res.unmatched.join(", ")})`);
+  }
+  return 0;
 }
 
 async function teachLoop(
